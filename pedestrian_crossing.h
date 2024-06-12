@@ -5,6 +5,7 @@
 
 namespace pedestrian_crossing {
 
+// Event are transitions between states
 namespace events {
 
     struct initialised
@@ -36,6 +37,7 @@ namespace events {
         return timer<Duration>(duration);
     }
 
+// this variant must include all events used in the state machine
 using type = std::variant<
     events::initialised,
     events::press_button,
@@ -44,6 +46,12 @@ using type = std::variant<
 
 }   // namespace events
 
+
+// Each state is implemented in a structure and can hold state
+// while it is active
+// Functions enter() and leave() are option, but if exist they
+// will be call by the finite state machine class during state
+// transitions
 namespace states {
 
     struct state_machine;
@@ -71,10 +79,6 @@ namespace states {
 
     struct initialising
     {
-        template<typename StateMachine>
-        void enter(StateMachine &/*fsm*/)
-        {
-        }
     };
 
     struct red : state_base
@@ -85,18 +89,6 @@ namespace states {
         void enter(StateMachine &fsm)
         {
             std::cout << "Lights are Red\n";
-            transition_after_time(fsm, events::make_timer(duration));
-        }
-    };
-
-    struct amber_flash : state_base
-    {
-        std::chrono::seconds duration = 5s;
-
-        template<typename StateMachine>
-        void enter(StateMachine &fsm)
-        {
-            std::cout << "Lights are Flashing Amber\n";
             transition_after_time(fsm, events::make_timer(duration));
         }
     };
@@ -139,10 +131,39 @@ namespace states {
         }
     };
 
+    struct amber_flash : state_base
+    {
+        std::chrono::seconds duration = 5s;
+
+        template<typename StateMachine>
+        void enter(StateMachine &fsm)
+        {
+            std::cout << "Lights are Flashing Amber\n";
+            transition_after_time(fsm, events::make_timer(duration));
+        }
+    };
+
+    struct amber_flash_button_pressed
+    {
+        template<typename StateMachine>
+        void enter(StateMachine &fsm)
+        {
+            using namespace std::literals::chrono_literals;
+
+            std::cout << "Amber is flashing. Button press has been queued\n";
+            fsm.async_wait_for_state(
+                states::green(),
+                [&fsm](){
+                    fsm.set_event(events::press_button());
+                });
+        }
+    };
+
 using type = std::variant<
     states::initialising,   // initial state
     states::red,
     states::amber_flash,
+    states::amber_flash_button_pressed,
     states::green,
     states::green_button_pressed,
     states::amber
@@ -193,21 +214,20 @@ class crossing_state_machine
     }
 
     // AMBER FLASHING state events
-    states::type on_event(states::amber_flash &&state, events::press_button &&)
+    states::type on_event(states::amber_flash &&, events::press_button &&)
     {
-        using namespace std::literals::chrono_literals;
-
-        auto timer_fn = [this] {
-            wait_for_state(states::green());
-            set_event(events::press_button());
-        };
-        std::thread(timer_fn).detach();
-        std::cout << "Amber is flashing. Button press has been queued\n";
-        return std::move(state);
+        return states::amber_flash_button_pressed();
     }
 
     template<typename Duration>
     states::type on_event(states::amber_flash &&state, events::timer<Duration> &&)
+    {
+        return states::green();
+    }
+
+    // AMBER FLASHING, BUTTON PRESSED state events
+    template<typename Duration>
+    states::type on_event(states::amber_flash_button_pressed &&state, events::timer<Duration> &&)
     {
         return states::green();
     }
@@ -226,5 +246,32 @@ class crossing_state_machine
         return states::green();
     }
 };
+
+void run()
+{
+    crossing_state_machine crossing;
+    crossing.set_event(events::initialised());
+
+    bool quit = false;
+    while (!quit)
+    {
+        char ch;
+        std::cin.get(ch);
+
+        switch (ch)
+        {
+            
+            case 'q':
+            case 'Q':
+                quit = true;
+                break;
+
+            case 'b':
+            case 'B':
+                crossing.set_event(events::press_button());
+                break;
+        }
+    }
+}
 
 }   // namespace pedestrian_crossing

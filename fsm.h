@@ -75,12 +75,16 @@ class state_machine
             current_state_);
     }
 
-    void wait_for_state(state_t const &state) const
+    template<typename Fn>
+    void async_wait_for_state(state_t const &state, Fn fn) const
     {
         using namespace std::literals::chrono_literals;
 
-        while (current_state_.index() != state.index())
-            std::this_thread::sleep_for(10ms);
+        std::thread([this, &state, fn] {
+            while (current_state_.index() != state.index())
+                std::this_thread::sleep_for(10ms);
+            fn();
+        }).detach();
     }
 
   protected:
@@ -100,16 +104,16 @@ class state_machine
     void enter(State &state)
     {
         auto instance = reinterpret_cast<derived_t *>(this);
-        if constexpr (requires { state.enter(*this); })
-            state.enter(*this);
+        if constexpr (requires { state.enter(*instance); })
+            state.enter(*instance);
     }
 
     template<typename State>
     void leave(State &state)
     {
         auto instance = reinterpret_cast<derived_t *>(this);
-        if constexpr (requires { state.leave(*this); })
-            state.leave(*this);
+        if constexpr (requires { state.leave(*instance); })
+            state.leave(*instance);
     }
 
   private:
