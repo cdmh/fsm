@@ -9,6 +9,12 @@ namespace events {
 
     struct initialised
     {
+        // make the state object noncopyable
+        initialised()                               = default;
+        initialised(initialised &&)                 = default;
+        initialised &operator=(initialised &&)      = default;
+        initialised(initialised const &)            = delete;
+        initialised &operator=(initialised const &) = delete;
     };
 
     struct press_button
@@ -45,6 +51,13 @@ namespace states {
 
     struct state_base
     {
+        // make the state object noncopyable
+        state_base()                              = default;
+        state_base(state_base &&)                 = default;
+        state_base &operator=(state_base &&)      = default;
+        state_base(state_base const &)            = delete;
+        state_base &operator=(state_base const &) = delete;
+
         template<typename StateMachine, typename Event>
         void transition_after_time(StateMachine &fsm, Event &&event)
         {
@@ -147,40 +160,40 @@ class crossing_state_machine
     using base_t::on_event;
 
     // GREEN state events
-    states::type on_event(states::green const &state, events::press_button const &)
+    states::type on_event(states::green &&state, events::press_button &&)
     {
         return states::green_button_pressed();
     }
 
     // GREEN, BUTTON PRESSED state events
     template<typename Duration>
-    states::type on_event(states::green_button_pressed const &state, events::timer<Duration> const &)
+    states::type on_event(states::green_button_pressed &&state, events::timer<Duration> &&)
     {
         return states::amber();
     }
 
     // AMBER state event
     template<typename Duration>
-    states::type on_event(states::amber const &state, events::timer<Duration>)
+    states::type on_event(states::amber &&state, events::timer<Duration> &&)
     {
         return states::red();
     }
 
     // RED state events
     template<typename Duration>
-    states::type on_event(states::red const &state, events::timer<Duration>)
+    states::type on_event(states::red &&state, events::timer<Duration> &&)
     {
         return states::amber_flash();
     }
 
-    states::type on_event(states::red const &state, events::press_button)
+    states::type on_event(states::red &&state, events::press_button &&)
     {
         std::cout << "The lights are red, please cross the road now.\n";
-        return state;
+        return std::move(state);
     }
 
     // AMBER FLASHING state events
-    states::type on_event(states::amber_flash state, events::press_button)
+    states::type on_event(states::amber_flash &&state, events::press_button &&)
     {
         using namespace std::literals::chrono_literals;
 
@@ -190,24 +203,24 @@ class crossing_state_machine
         };
         std::thread(timer_fn).detach();
         std::cout << "Amber is flashing. Button press has been queued\n";
-        return state;
+        return std::move(state);
     }
 
     template<typename Duration>
-    states::type on_event(states::amber_flash const &state, events::timer<Duration>)
+    states::type on_event(states::amber_flash &&state, events::timer<Duration> &&)
     {
         return states::green();
     }
 
     // all other states ignore the button press
-    states::type on_event(auto const &state, events::press_button)
+    states::type on_event(auto &&state, events::press_button &&)
     {
         std::cout << "Button has already been pressed. Please be patient.\n";
-        return state;
+        return std::move(state);
     }
 
     // INITIALISING state event
-    states::type on_event(states::initialising const &state, events::initialised)
+    states::type on_event(states::initialising &&state, events::initialised &&)
     {
         // initialise to Green state
         return states::green();

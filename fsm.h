@@ -44,16 +44,23 @@ class state_machine
     using derived_t = Derived;
 
   public:
-    state_machine() = default;
+    // make the state machine noncopyable, but keep it movable
+    state_machine()                                 = default;
+    state_machine(state_machine &&)                 = default;
+    state_machine &operator=(state_machine &&)      = default;
+    state_machine(state_machine const &)            = delete;
+    state_machine &operator=(state_machine const &) = delete;
 
-    void set_event(event_t const &ev)
+    void set_event(event_t &&event)
     {
         auto instance = reinterpret_cast<derived_t *>(this);
-        auto fn = [instance](auto const &state, auto const &evt) {
-            return instance->on_event(state, evt);
+        auto fn = [instance](auto &&state, auto &&event) -> state_t {
+            return instance->on_event(
+                std::move(state),
+                std::move(event));
         };
 
-        auto &&new_state = std::visit(detail::overload{ fn }, std::move(current_state_), ev);
+        auto &&new_state = std::visit(detail::overload{ fn }, current_state_, event);
         if (new_state.index() == current_state_.index())
             return;
 
@@ -61,7 +68,7 @@ class state_machine
             detail::overload{[this](auto &state){ leave(state); }},
             current_state_);
 
-        current_state_ = std::forward<state_t>(new_state);
+        current_state_ = std::move(new_state);
 
         std::visit(
             detail::overload{[this](auto &state){ enter(state); } },
@@ -77,21 +84,18 @@ class state_machine
     }
 
   protected:
-    state_t on_event(auto const &state, auto const &event)
+    state_t on_event(auto &&state, auto &&event)
     {
 #ifndef NDEBUG
         std::cout << "Unknown state/event combination\n";
         std::cout << "    " << typeid(state).name() << '\t' << typeid(state).raw_name() << '\n';
         std::cout << "    " << typeid(event).name() << '\t' << typeid(event).raw_name() << '\n';
 #endif  // NDEBUG
-        return state;
+        //static_assert(!"Error");
+        return std::move(state);
     }
 
   private:
-    // make the state machine noncopyable
-    state_machine(state_machine const &)            = delete;
-    state_machine& operator=(state_machine const &) = delete;
-
     template<typename State>
     void enter(State &state)
     {
@@ -101,7 +105,7 @@ class state_machine
     }
 
     template<typename State>
-    void leave(State state)
+    void leave(State &state)
     {
         auto instance = reinterpret_cast<derived_t *>(this);
         if constexpr (requires { state.leave(*this); })
