@@ -30,13 +30,13 @@ namespace events {
         return timer<Duration>(duration);
     }
 
-}   // namespace events
-
-using event = std::variant<
+using type = std::variant<
     events::initialised,
     events::press_button,
     events::timer<std::chrono::seconds>
 >;
+
+}   // namespace events
 
 namespace states {
 
@@ -126,9 +126,7 @@ namespace states {
         }
     };
 
-}   // namespace states
-
-using state = std::variant<
+using type = std::variant<
     states::initialising,   // initial state
     states::red,
     states::amber_flash,
@@ -137,49 +135,52 @@ using state = std::variant<
     states::amber
 >;
 
-class crossing_state_machine : public fsm::state_machine<crossing_state_machine, state, event>
+}   // namespace states
+
+class crossing_state_machine
+    : public fsm::state_machine<crossing_state_machine, states::type, events::type>
 {
   public:
-    using base_t = fsm::state_machine<crossing_state_machine, state, event>;
+    using base_t = fsm::state_machine<crossing_state_machine, states::type, events::type>;
 
     // enable default processing for undefined state/event pairs
     using base_t::on_event;
 
     // GREEN state events
-    state on_event(states::green const &state, events::press_button const &)
+    states::type on_event(states::green const &state, events::press_button const &)
     {
         return states::green_button_pressed();
     }
 
     // GREEN, BUTTON PRESSED state events
     template<typename Duration>
-    state on_event(states::green_button_pressed const &state, events::timer<Duration> const &)
+    states::type on_event(states::green_button_pressed const &state, events::timer<Duration> const &)
     {
         return states::amber();
     }
 
     // AMBER state event
     template<typename Duration>
-    state on_event(states::amber const &state, events::timer<Duration>)
+    states::type on_event(states::amber const &state, events::timer<Duration>)
     {
         return states::red();
     }
 
     // RED state events
     template<typename Duration>
-    state on_event(states::red const &state, events::timer<Duration>)
+    states::type on_event(states::red const &state, events::timer<Duration>)
     {
         return states::amber_flash();
     }
 
-    state on_event(states::red const &state, events::press_button)
+    states::type on_event(states::red const &state, events::press_button)
     {
         std::cout << "The lights are red, please cross the road now.\n";
         return state;
     }
 
     // AMBER FLASHING state events
-    state on_event(states::amber_flash state, events::press_button)
+    states::type on_event(states::amber_flash state, events::press_button)
     {
         using namespace std::literals::chrono_literals;
 
@@ -193,20 +194,20 @@ class crossing_state_machine : public fsm::state_machine<crossing_state_machine,
     }
 
     template<typename Duration>
-    state on_event(states::amber_flash const &state, events::timer<Duration>)
+    states::type on_event(states::amber_flash const &state, events::timer<Duration>)
     {
         return states::green();
     }
 
     // all other states ignore the button press
-    state on_event(auto const &state, events::press_button)
+    states::type on_event(auto const &state, events::press_button)
     {
         std::cout << "Button has already been pressed. Please be patient.\n";
         return state;
     }
 
     // INITIALISING state event
-    state on_event(states::initialising const &state, events::initialised)
+    states::type on_event(states::initialising const &state, events::initialised)
     {
         // initialise to Green state
         return states::green();

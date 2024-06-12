@@ -39,9 +39,8 @@ template<typename Derived, typename State, typename Event>
 class state_machine
 {
   private:
-    using event_t = Event;  // !!!remove these template parameters
+    using event_t = Event;
     using state_t = State;
-
     using derived_t = Derived;
 
   public:
