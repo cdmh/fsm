@@ -1,6 +1,6 @@
 #pragma once
 
-#include "fsm.h"
+#include "include/fsm.h"
 #include <iostream>
 
 namespace pedestrian_crossing {

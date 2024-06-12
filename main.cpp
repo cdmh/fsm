@@ -1,4 +1,4 @@
-#include "pedestrian_crossing.h"
+#include "samples/pedestrian_crossing.h"
 
 int main()
 {
