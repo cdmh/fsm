@@ -23,10 +23,13 @@
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="fsm.h">
+    <ClInclude Include="samples\pedestrian_crossing.hpp">
+      <Filter>Header Files\samples</Filter>
+    </ClInclude>
+    <ClInclude Include="include\fsm.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="samples\pedestrian_crossing.h">
+    <ClInclude Include="samples\tokeniser.hpp">
       <Filter>Header Files\samples</Filter>
     </ClInclude>
   </ItemGroup>

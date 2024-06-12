@@ -1,6 +1,7 @@
-#include "samples/pedestrian_crossing.h"
+#include "samples/pedestrian_crossing.hpp"
+#include "samples/tokeniser.hpp"
 
 int main()
 {
-    pedestrian_crossing::run();
+    tokeniser::run();
 }

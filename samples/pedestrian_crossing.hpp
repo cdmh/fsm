@@ -1,6 +1,6 @@
 #pragma once
 
-#include "include/fsm.h"
+#include "include/fsm.hpp"
 #include <iostream>
 
 namespace pedestrian_crossing {
@@ -8,34 +8,34 @@ namespace pedestrian_crossing {
 // Event are transitions between states
 namespace events {
 
-    struct initialised
-    {
-        // make the state object noncopyable
-        initialised()                               = default;
-        initialised(initialised &&)                 = default;
-        initialised &operator=(initialised &&)      = default;
-        initialised(initialised const &)            = delete;
-        initialised &operator=(initialised const &) = delete;
-    };
+struct initialised
+{
+    // make the state object noncopyable
+    initialised()                               = default;
+    initialised(initialised &&)                 = default;
+    initialised &operator=(initialised &&)      = default;
+    initialised(initialised const &)            = delete;
+    initialised &operator=(initialised const &) = delete;
+};
 
-    struct press_button
-    {
-    };
+struct press_button
+{
+};
 
-    template<typename Duration>
-    struct timer
+template<typename Duration>
+struct timer
+{
+    timer(Duration duration) : duration(duration)
     {
-        timer(Duration duration) : duration(duration)
-        {
-        }
-
-        Duration duration;
-    };
-    template<typename Duration>
-    timer<Duration> make_timer(Duration duration)
-    {
-        return timer<Duration>(duration);
     }
+
+    Duration duration;
+};
+template<typename Duration>
+timer<Duration> make_timer(Duration duration)
+{
+    return timer<Duration>(duration);
+}
 
 // this variant must include all events used in the state machine
 using type = std::variant<
@@ -54,110 +54,110 @@ using type = std::variant<
 // transitions
 namespace states {
 
-    struct state_machine;
-    using namespace std::literals::chrono_literals;
+struct state_machine;
+using namespace std::literals::chrono_literals;
 
-    struct state_base
+struct state_base
+{
+    // make the state object noncopyable
+    state_base()                              = default;
+    state_base(state_base &&)                 = default;
+    state_base &operator=(state_base &&)      = default;
+    state_base(state_base const &)            = delete;
+    state_base &operator=(state_base const &) = delete;
+
+    template<typename StateMachine, typename Event>
+    void transition_after_time(StateMachine &fsm, Event &&event)
     {
-        // make the state object noncopyable
-        state_base()                              = default;
-        state_base(state_base &&)                 = default;
-        state_base &operator=(state_base &&)      = default;
-        state_base(state_base const &)            = delete;
-        state_base &operator=(state_base const &) = delete;
+        auto timer_fn = [this, &fsm, event]{
+            std::this_thread::sleep_for(event.duration);
+            fsm.set_event(event);
+        };
+        std::thread(timer_fn).detach();
+    }
+};
 
-        template<typename StateMachine, typename Event>
-        void transition_after_time(StateMachine &fsm, Event &&event)
-        {
-            auto timer_fn = [this, &fsm, event]{
-                std::this_thread::sleep_for(event.duration);
-                fsm.set_event(event);
-            };
-            std::thread(timer_fn).detach();
-        }
-    };
+struct initialising
+{
+};
 
-    struct initialising
+struct red : state_base
+{ 
+    std::chrono::seconds duration = 15s;
+
+    template<typename StateMachine>
+    void enter(StateMachine &fsm)
     {
-    };
+        std::cout << "Lights are Red\n";
+        transition_after_time(fsm, events::make_timer(duration));
+    }
+};
 
-    struct red : state_base
-    { 
-        std::chrono::seconds duration = 15s;
-
-        template<typename StateMachine>
-        void enter(StateMachine &fsm)
-        {
-            std::cout << "Lights are Red\n";
-            transition_after_time(fsm, events::make_timer(duration));
-        }
-    };
-
-    struct green
+struct green
+{
+    template<typename StateMachine>
+    void enter(StateMachine &/*fsm*/)
     {
-        template<typename StateMachine>
-        void enter(StateMachine &/*fsm*/)
-        {
-            std::cout << "Lights are Green\n";
-        }
-    };
+        std::cout << "Lights are Green\n";
+    }
+};
 
-    struct green_button_pressed : state_base
+struct green_button_pressed : state_base
+{
+    std::chrono::seconds duration;
+
+    green_button_pressed(std::chrono::seconds duration = 10s)
+        : duration(duration)
     {
-        std::chrono::seconds duration;
+    }
 
-        green_button_pressed(std::chrono::seconds duration = 10s)
-          : duration(duration)
-        {
-        }
-
-        template<typename StateMachine>
-        void enter(StateMachine &fsm)
-        {
-            std::cout << "The lights are green and the button has been pressed. Please wait " << duration << '\n';
-            transition_after_time(fsm, events::make_timer(duration));
-        }
-    };
-
-    struct amber : state_base
+    template<typename StateMachine>
+    void enter(StateMachine &fsm)
     {
-        std::chrono::seconds duration = 2s;
+        std::cout << "The lights are green and the button has been pressed. Please wait " << duration << '\n';
+        transition_after_time(fsm, events::make_timer(duration));
+    }
+};
 
-        template<typename StateMachine>
-        void enter(StateMachine &fsm)
-        {
-            std::cout << "Lights are Amber\n";
-            transition_after_time(fsm, events::make_timer(duration));
-        }
-    };
+struct amber : state_base
+{
+    std::chrono::seconds duration = 2s;
 
-    struct amber_flash : state_base
+    template<typename StateMachine>
+    void enter(StateMachine &fsm)
     {
-        std::chrono::seconds duration = 5s;
+        std::cout << "Lights are Amber\n";
+        transition_after_time(fsm, events::make_timer(duration));
+    }
+};
 
-        template<typename StateMachine>
-        void enter(StateMachine &fsm)
-        {
-            std::cout << "Lights are Flashing Amber\n";
-            transition_after_time(fsm, events::make_timer(duration));
-        }
-    };
+struct amber_flash : state_base
+{
+    std::chrono::seconds duration = 5s;
 
-    struct amber_flash_button_pressed
+    template<typename StateMachine>
+    void enter(StateMachine &fsm)
     {
-        template<typename StateMachine>
-        void enter(StateMachine &fsm)
-        {
-            using namespace std::literals::chrono_literals;
+        std::cout << "Lights are Flashing Amber\n";
+        transition_after_time(fsm, events::make_timer(duration));
+    }
+};
 
-            std::cout << "Amber is flashing. Button press has been queued\n";
-            fsm.async_wait_for_state(
-                states::green(),
-                [&fsm](){
-                    fsm.set_event(events::press_button());
-                });
-        }
-    };
+struct amber_flash_button_pressed
+{
+    template<typename StateMachine>
+    void enter(StateMachine &fsm)
+    {
+        using namespace std::literals::chrono_literals;
+
+        std::cout << "Amber is flashing. Button press has been queued\n";
+        fsm.async_wait_for_state(
+            states::green(),
+            [&fsm](){
+                fsm.set_event(events::press_button());
+            });
+    }
+};
 
 using type = std::variant<
     states::initialising,   // initial state
