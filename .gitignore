@@ -1,7 +1,4 @@
 /.vs
 .vs
-fsm/Debug
-fsm/Release
-fsm/x64
-/x64/
+/bin/*
 /fsm.vcxproj.user

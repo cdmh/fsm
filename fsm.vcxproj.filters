@@ -23,5 +23,8 @@
     <ClInclude Include="fsm.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="pedestrian_crossing.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
 </Project>
