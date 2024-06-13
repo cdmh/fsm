@@ -39,9 +39,9 @@ timer<Duration> make_timer(Duration duration)
 
 // this variant must include all events used in the state machine
 using type = std::variant<
-    events::initialised,
-    events::press_button,
-    events::timer<std::chrono::seconds>
+    initialised,
+    press_button,
+    timer<std::chrono::seconds>
 >;
 
 }   // namespace events
@@ -160,13 +160,13 @@ struct amber_flash_button_pressed
 };
 
 using type = std::variant<
-    states::initialising,   // initial state
-    states::red,
-    states::amber_flash,
-    states::amber_flash_button_pressed,
-    states::green,
-    states::green_button_pressed,
-    states::amber
+    initialising,   // initial state
+    red,
+    amber_flash,
+    amber_flash_button_pressed,
+    green,
+    green_button_pressed,
+    amber
 >;
 
 }   // namespace states
