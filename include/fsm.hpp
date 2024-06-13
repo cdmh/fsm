@@ -35,7 +35,7 @@ void print_variant_types()
 
 }   // namespace detail
 
-template<typename Derived, typename State, typename Event>
+template<typename Derived, typename State, typename Event, bool DebugTrace=false>
 class state_machine
 {
   private:
@@ -53,26 +53,18 @@ class state_machine
 
     void set_event(event_t &&event)
     {
-        auto instance = reinterpret_cast<derived_t *>(this);
-        auto fn = [instance](auto &&state, auto &&event) -> state_t {
+        auto fn = [instance = reinterpret_cast<derived_t *>(this)](auto &&state, auto &&event) -> state_t {
             return instance->on_event(
                 std::move(state),
                 std::move(event));
         };
 
         auto &&new_state = std::visit(detail::overload{ fn }, current_state_, event);
-        if (new_state.index() == current_state_.index())
-            return;
 
+        bool const state_changed = (new_state.index() != current_state_.index());
         std::visit(
-            detail::overload{[this](auto &state){ leave(state); }},
-            current_state_);
-
-        current_state_ = std::move(new_state);
-
-        std::visit(
-            detail::overload{[this](auto &state){ enter(state); } },
-            current_state_);
+            detail::overload{[this, state_changed](auto &&state){ transition(state, state_changed); } },
+            new_state);
     }
 
     template<typename Fn>
@@ -100,20 +92,50 @@ class state_machine
     }
 
   private:
-    template<typename State>
-    void enter(State &state)
+    void debug_output_transition(auto &new_state)
     {
-        auto instance = reinterpret_cast<derived_t *>(this);
-        if constexpr (requires { state.enter(*instance); })
-            state.enter(*instance);
+        std::visit(
+            [&new_state](auto &&type) {
+                std::cout << typeid(type).name() << " --> "
+                          << typeid(new_state).name() << "\n";
+            },
+            current_state_);
     }
-
-    template<typename State>
-    void leave(State &state)
+    void transition(auto &&new_state, bool const state_changed)
     {
+        if constexpr (DebugTrace)
+            debug_output_transition(new_state);
+
         auto instance = reinterpret_cast<derived_t *>(this);
-        if constexpr (requires { state.leave(*instance); })
-            state.leave(*instance);
+        if (state_changed)
+        {
+            std::visit(
+                [this](auto &state){
+                    auto instance = reinterpret_cast<derived_t *>(this);
+                    if constexpr (requires { state.leave(*instance); })
+                        state.leave(*instance);
+                },
+                current_state_);
+
+            current_state_ = std::move(new_state);
+
+            std::visit(
+                [this](auto &state){
+                    auto instance = reinterpret_cast<derived_t *>(this);
+                    if constexpr (requires { state.enter(*instance); })
+                        state.enter(*instance);
+                },
+                current_state_);
+        }
+        else
+        {
+            // if the state hasn't changed, we call reenter() instead of
+            // leave() followed by enter().
+            // this gives the FSM implementer a choice of how to handle
+            // re-entry
+            if constexpr (requires { new_state.reenter(*instance); })
+                new_state.reenter(*instance);
+        }
     }
 
   private:
