@@ -54,6 +54,9 @@ class state_machine
     void set_event(event_t &&event)
     {
         auto fn = [instance = reinterpret_cast<derived_t *>(this)](auto &&state, auto &&event) -> state_t {
+            if constexpr (DebugTrace)
+                    std::cout << "\033[93m" << typeid(event).name() << "\033[0m\n    ";
+
             return instance->on_event(
                 std::move(state),
                 std::move(event));
@@ -88,7 +91,6 @@ class state_machine
         std::cout << "    " << typeid(event).name() << '\t' << typeid(event).raw_name() << '\n';
         std::cout << "\033[0m";
 #endif  // NDEBUG
-        //static_assert(!"Error");
         return std::move(state);
     }
 
