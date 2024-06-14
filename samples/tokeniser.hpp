@@ -3,6 +3,10 @@
 #include "include/fsm.hpp"
 #include <iostream>
 
+#ifndef TRACE_TOKENISER
+#define TRACE_TOKENISER 0
+#endif  // TRACE_TOKENISER
+
 namespace detail {
 
 class expression_holder
@@ -157,13 +161,23 @@ class continue_token : public detail::token_info
     }
 };
 
+class end_token : public detail::token_info
+{
+  public:
+    end_token(token_info &&other)
+      : token_info(std::forward<token_info>(other))
+    {
+    }
+};
+
 // this variant must include all events used in the state machine
 using type = std::variant<
     error,
     initialise,
     begin_parsing,
     begin_token,
-    continue_token
+    continue_token,
+    end_token
 >;
 
 }   // namespace events
@@ -181,11 +195,6 @@ using namespace std::literals::chrono_literals;
 
 struct initialised
 {
-    template<typename StateMachine>
-    void leave(StateMachine &)
-    {
-        std::cout << "Leaving Initialised\n";
-    }
 };
 
 struct error
@@ -222,13 +231,20 @@ class in_token : public detail::token_info
     template<typename StateMachine>
     void enter(StateMachine &fsm)
     {
-    std::cout << (void*)token_.c_str() << '\t' <<  (void*)&*next_ << ' ' << *next_ << '\n';
+        if (!has_more_chars()) {
+            fsm.set_event(events::end_token(std::move(*this)));
+            return;
+        }
+
         if (std::isdigit(peek())) {
             token_ += next_char();
             fsm.set_event(events::continue_token(std::move(*this)));
+            return;
         }
-        else if (has_more_chars())
-            fsm.set_event(events::error("Digit expected!"));
+
+        std::ostringstream err;
+        err << "Digit expected, found '" << peek() << "'";
+        fsm.set_event(events::error(err.str()));
     }
 
     template<typename StateMachine>
@@ -238,7 +254,7 @@ class in_token : public detail::token_info
     }
 };
 
-struct new_token : public detail::token_info
+class new_token : public detail::token_info
 {
   public:
     new_token(std::string_view &&expression)
@@ -249,7 +265,6 @@ struct new_token : public detail::token_info
     template<typename StateMachine>
     void enter(StateMachine &fsm)
     {
-    std::cout << (void*)token_.c_str() << '\t' <<  (void*)&*next_ << ' ' << *next_ << '\n';
         if (std::isdigit(peek())) {
             token_ += next_char();
             events::continue_token event(std::move(*this));
@@ -271,8 +286,26 @@ class parse : detail::expression_holder
     template<typename StateMachine>
     void enter(StateMachine &fsm)
     {
-        std::cout << "Ready to begin_parsing: " << expr() << "\n";
+        std::cout << "\n\033[92mReady to begin_parsing: " << expr() << "\033[0m\n";
         fsm.set_event(events::begin_token(expr()));
+    }
+};
+
+class token_complete : detail::token_holder
+{
+  public:
+    token_complete(token_holder &&other)
+      : token_holder(std::forward<token_holder>(other))
+    {
+    }
+
+    template<typename StateMachine>
+    void enter(StateMachine &fsm)
+    {
+#ifdef TRACE_TOKENISER
+        std::cout << "\033[96mFound token: " << token_ << "\033[0m\n";
+#endif  // TRACE_TOKENISER
+        fsm.set_event(events::initialise());
     }
 };
 
@@ -281,21 +314,23 @@ using type = std::variant<
     parse,
     new_token,
     in_token,
+    token_complete,
     error
 >;
 
 }   // namespace states
 
+
 class tokeniser_state_machine
-    : public fsm::state_machine<tokeniser_state_machine, states::type, events::type, true>
+    : public fsm::state_machine<tokeniser_state_machine, states::type, events::type, TRACE_TOKENISER==1>
 {
   public:
-    using base_t = fsm::state_machine<tokeniser_state_machine, states::type, events::type, true>;
+    using base_t = fsm::state_machine<tokeniser_state_machine, states::type, events::type, TRACE_TOKENISER==1>;
 
     // enable default processing for undefined state/event pairs
     using base_t::on_event;
 
-    states::type on_event(states::error &&, events::initialise &&)
+    states::type on_event(auto &&, events::initialise &&)
     {
         return states::initialised();
     }
@@ -312,12 +347,23 @@ class tokeniser_state_machine
 
     states::type on_event(states::new_token, events::continue_token &&event)
     {
-        return states::in_token(std::forward<events::continue_token>(event));
+        return states::in_token(std::forward<decltype(event)>(event));
     }
 
     states::type on_event(states::in_token &&state, events::continue_token &&event)
     {
-        return state;
+        return states::in_token(std::forward<decltype(event)>(event));
+    }
+
+    states::type on_event(states::in_token &&state, events::end_token &&event)
+    {
+        return states::token_complete(std::forward<decltype(event)>(event));
+    }
+
+    states::type on_event(auto &&, events::error &&event)
+    {
+        std::cout << "\033[91mERROR: " << event.what() << "\033[0m\n";
+        return states::initialised();
     }
 };
 

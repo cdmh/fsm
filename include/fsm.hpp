@@ -83,9 +83,10 @@ class state_machine
     state_t on_event(auto &&state, auto &&event)
     {
 #ifndef NDEBUG
-        std::cout << "Unknown state/event combination\n";
+        std::cout << "\033[31mUnknown state/event combination\n";
         std::cout << "    " << typeid(state).name() << '\t' << typeid(state).raw_name() << '\n';
         std::cout << "    " << typeid(event).name() << '\t' << typeid(event).raw_name() << '\n';
+        std::cout << "\033[0m";
 #endif  // NDEBUG
         //static_assert(!"Error");
         return std::move(state);
@@ -96,8 +97,10 @@ class state_machine
     {
         std::visit(
             [&new_state](auto &&type) {
-                std::cout << typeid(type).name() << " --> "
-                          << typeid(new_state).name() << "\n";
+                std::cout << "\033[93m"
+                          << typeid(type).name() << " --> "
+                          << typeid(new_state).name()
+                          << "\033[0m\n";
             },
             current_state_);
     }
