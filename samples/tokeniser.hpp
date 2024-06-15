@@ -26,61 +26,67 @@ constexpr auto make_lut(std::string_view allowed)
 constexpr auto valid_token_chars = make_lut("0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz_");
 constexpr auto numeric_digits    = make_lut("0123456789");
 constexpr auto space_chars       = make_lut(" \t\r\n\f\v");
-constexpr auto operator_chars    = make_lut("*&!<>=+-/,.");
+constexpr auto operator_chars    = make_lut("*&!<>=+-/,.^()");
 constexpr auto quote_chars       = make_lut("'\"");
 constexpr auto bin_digits        = make_lut("01");
 constexpr auto oct_digits        = make_lut("01234567");
 constexpr auto hex_digits        = make_lut("0123456789ABCDEFabcdef");
     
 constexpr
-bool const is_valid_token_char(auto ch)
+bool const is_valid_token_char(auto ch) noexcept
 {
     return valid_token_chars[ch];
 };
 
 constexpr
-bool const is_numeric_token_char(auto ch)
+bool const is_numeric_token_char(auto ch) noexcept
 {
     return numeric_digits[ch];
 };
 
 constexpr
-bool const is_space(auto ch)
+bool const is_space(auto ch) noexcept
 {
     return space_chars[ch];
 };
 
 constexpr
-bool const is_operator_char(auto ch)
+bool const is_operator_char(auto ch) noexcept
 {
     return operator_chars[ch];
 };
 
 constexpr
-bool const is_quote_char(auto ch)
+bool const is_quote_char(auto ch) noexcept
 {
     return quote_chars[ch];
 };
 
 constexpr
-bool const is_hex_digit(auto ch)
+bool const is_hex_digit(auto ch) noexcept
 {
     return hex_digits[ch];
 };
 
 constexpr
-bool const is_oct_digit(auto ch)
+bool const is_oct_digit(auto ch) noexcept
 {
     return oct_digits[ch];
 };
 
 constexpr
-bool const is_bin_digit(auto ch)
+bool const is_bin_digit(auto ch) noexcept
 {
     return bin_digits[ch];
 };
 
+constexpr
+bool const is_token_separator(auto ch) noexcept
+{
+    return is_space(ch)  ||  is_operator_char(ch);
 }
+
+}   // namespace lut
 
 using namespace lut;
 
@@ -156,6 +162,14 @@ class token_holder
 class token_info : public expression_holder, public token_holder
 {
   public:
+    enum class token_type {
+        unknown,
+        numeric_literal,
+        string_literal,
+        operator_type,
+    };
+
+  public:
     token_info(std::string_view &&expression)
       : expression_holder(std::forward<std::string_view>(expression))
     {
@@ -171,6 +185,9 @@ class token_info : public expression_holder, public token_holder
         token_holder(std::forward<std::string>(token))
     {
     }
+
+  public:
+    token_type token_type_;
 };
 
 }   // namespace detail
@@ -364,10 +381,8 @@ class token_complete : public detail::token_info
     template<typename StateMachine>
     void enter(StateMachine &fsm)
     {
-/*
-!!! IF NUMERIC LITERAL TOKEN !!!
-*/
-        if (token_.length() > 2  &&  token_[0] == '0')
+        if (token_type_ == token_type::numeric_literal
+        &&  token_.length() > 2  &&  token_[0] == '0')
         {
             std::ostringstream token;
             char *ptr = nullptr;
@@ -387,11 +402,41 @@ class token_complete : public detail::token_info
 
 #ifdef TRACE_TOKENISER
         if (!token_.empty())
-            std::cout << "\033[96mFound token: \033[30;46m" << token_ << "\033[0m\n";
+        {
+            std::cout << "\033[96mFound token: \033[0m[";
+            switch (token_type_) {
+                case token_type::unknown:
+                    std::cout << "unknown type";
+                    break;
+                case token_type::numeric_literal:
+                    std::cout << "numeric";
+                    break;
+                case token_type::string_literal:
+                    std::cout << "string";
+                    break;
+                case token_type::operator_type:
+                    std::cout << "operator";
+                    break;
+                default:
+                    std::cout << "UNDEFINED";
+                    break;
+            }
+            std::cout << "] \033[30;46m" << token_ << "\033[0m\n";
+        }
 #endif  // TRACE_TOKENISER
 
-        if (has_more_chars())
-            fsm.set_event(events::begin_token(std::move(*this)));
+        if (has_more_chars()) {
+            if (token_type_ == token_type::operator_type
+            ||  detail::is_token_separator(peek()))
+            {
+                fsm.set_event(events::begin_token(std::move(*this)));
+            }
+            else {
+                std::ostringstream msg;
+                msg << "Invalid character: '" << peek() << "' in \"" << expr() << "\" at position " << position();
+                fsm.set_event(events::error(msg.str()));
+            }
+        }
         else
             fsm.set_event(events::initialise());
     }
@@ -400,10 +445,17 @@ class token_complete : public detail::token_info
 class in_operator_token : public detail::in_token<in_operator_token>
 {
   public:
+    template<typename StateMachine>
+    void enter(StateMachine &fsm)
+    {
+        token_type_ = token_type::operator_type;
+        in_token<in_operator_token>::enter(fsm);
+    }
+
     template<typename char_type>
     bool is_valid_char(char_type ch) const
     {
-        return detail::is_operator_char(peek());
+        return detail::is_operator_char(ch);
     }
 };
 
@@ -443,6 +495,8 @@ class in_numeric_token : public detail::in_token<in_numeric_token>
     template<typename StateMachine>
     void enter(StateMachine &fsm)
     {
+        token_type_ = token_type::numeric_literal;
+
         if (has_more_chars()  &&  token_.length() == 1  &&  token_[0] == '0') {
             switch (peek())   //!!TODO
             {

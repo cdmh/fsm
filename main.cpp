@@ -1,5 +1,5 @@
+#define TRACE_TOKENISER 1
 #include "samples/pedestrian_crossing.hpp"
-//#define TRACE_TOKENISER 0
 #include "samples/tokeniser.hpp"
 
 int main()
