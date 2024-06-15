@@ -55,7 +55,7 @@ class state_machine
     {
         auto fn = [instance = reinterpret_cast<derived_t *>(this)](auto &&state, auto &&event) -> state_t {
             if constexpr (DebugTrace)
-                    std::cout << "\033[93m" << typeid(event).name() << "\033[0m\n    ";
+                std::cout << "\033[95m" << typeid(event).name() << "\033[0m\n    ";
 
             return instance->on_event(
                 std::move(state),

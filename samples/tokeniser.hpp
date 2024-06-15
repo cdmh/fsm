@@ -2,12 +2,87 @@
 
 #include "include/fsm.hpp"
 #include <iostream>
+#include <sstream>
+#include <array>
 
 #ifndef TRACE_TOKENISER
 #define TRACE_TOKENISER 0
 #endif  // TRACE_TOKENISER
 
+namespace tokeniser {
+
 namespace detail {
+
+namespace lut {
+
+constexpr auto make_lut(std::string_view allowed)
+{
+    std::array<int, sizeof(std::string_view::value_type) << 8> lut{0};
+    for (auto ch : allowed)
+        lut[ch] = true;
+    return lut;
+}
+
+constexpr auto valid_token_chars = make_lut("0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz_");
+constexpr auto numeric_digits    = make_lut("0123456789");
+constexpr auto space_chars       = make_lut(" \t\r\n\f\v");
+constexpr auto operator_chars    = make_lut("*&!<>=+-/,.");
+constexpr auto quote_chars       = make_lut("'\"");
+constexpr auto bin_digits        = make_lut("01");
+constexpr auto oct_digits        = make_lut("01234567");
+constexpr auto hex_digits        = make_lut("0123456789ABCDEFabcdef");
+    
+constexpr
+bool const is_valid_token_char(auto ch)
+{
+    return valid_token_chars[ch];
+};
+
+constexpr
+bool const is_numeric_token_char(auto ch)
+{
+    return numeric_digits[ch];
+};
+
+constexpr
+bool const is_space(auto ch)
+{
+    return space_chars[ch];
+};
+
+constexpr
+bool const is_operator_char(auto ch)
+{
+    return operator_chars[ch];
+};
+
+constexpr
+bool const is_quote_char(auto ch)
+{
+    return quote_chars[ch];
+};
+
+constexpr
+bool const is_hex_digit(auto ch)
+{
+    return hex_digits[ch];
+};
+
+constexpr
+bool const is_oct_digit(auto ch)
+{
+    return oct_digits[ch];
+};
+
+constexpr
+bool const is_bin_digit(auto ch)
+{
+    return bin_digits[ch];
+};
+
+}
+
+using namespace lut;
 
 class expression_holder
 {
@@ -40,9 +115,14 @@ class expression_holder
         return *next_++;
     }
 
-    bool has_more_chars() const noexcept
+    bool const has_more_chars() const noexcept
     {
         return next_ != expr_.cend();
+    }
+
+    int64_t const position() const noexcept
+    {
+        return std::distance(expr_.cbegin(), next_);
     }
 
   protected://!!!
@@ -76,12 +156,6 @@ class token_holder
 class token_info : public expression_holder, public token_holder
 {
   public:
-    token_info()                              = delete;
-    token_info(token_info &&)                 = default;
-    token_info &operator=(token_info &&)      = default;
-    token_info(token_info const &)            = delete;
-    token_info &operator=(token_info const &) = delete;
- 
     token_info(std::string_view &&expression)
       : expression_holder(std::forward<std::string_view>(expression))
     {
@@ -100,8 +174,6 @@ class token_info : public expression_holder, public token_holder
 };
 
 }   // namespace detail
-
-namespace tokeniser {
 
 // Event are transitions between states
 namespace events {
@@ -122,45 +194,22 @@ class error
     std::string msg_;
 };
 
-class initialise
+struct begin_parsing : public detail::expression_holder
 {
-};
-
-class begin_parsing : public detail::expression_holder
-{
-  public:
     begin_parsing(std::string_view &&expression)
         : expression_holder(std::forward<std::string_view>(expression))
     {
     }
 };
 
-class begin_token : public detail::expression_holder
-{
-  public:
-    begin_token(detail::expression_holder &&expression)
-      : expression_holder(std::forward<expression_holder>(expression))
-    {
-    }
-};
-
-class continue_token : public detail::token_info
-{
-  public:
-    continue_token(token_info &&other)
-      : token_info(std::forward<token_info>(other))
-    {
-    }
-};
-
-class end_token : public detail::token_info
-{
-  public:
-    end_token(token_info &&other)
-      : token_info(std::forward<token_info>(other))
-    {
-    }
-};
+struct initialise                                            { };
+struct begin_token        : public detail::expression_holder { };
+struct continue_token     : public detail::token_info        { };
+struct end_token          : public detail::token_info        { };
+struct seen_digit         : public detail::token_info        { };
+struct seen_operator_char : public detail::token_info        { };
+struct seen_quote         : public detail::token_info        { };
+struct seen_symbol_char   : public detail::token_info        { };
 
 // this variant must include all events used in the state machine
 using type = std::variant<
@@ -169,10 +218,53 @@ using type = std::variant<
     begin_parsing,
     begin_token,
     continue_token,
-    end_token
+    end_token,
+    seen_digit,
+    seen_operator_char,
+    seen_quote,
+    seen_symbol_char
 >;
 
 }   // namespace events
+
+
+namespace detail {
+
+template<typename Derived>
+class in_token : public token_info
+{
+  public:
+    in_token(token_info &&other)
+      : token_info(std::forward<token_info>(other))
+    {
+    }
+
+    template<typename StateMachine>
+    void enter(StateMachine &fsm)
+    {
+        if (has_more_chars()) {
+            if (detail::is_space(peek())) {
+                fsm.set_event(events::end_token(std::move(*this)));
+                return;
+            }
+
+            if (reinterpret_cast<Derived *>(this)->is_valid_char(peek())) {
+                token_ += next_char();
+                fsm.set_event(events::continue_token(std::move(*this)));
+                return;
+            }
+        }
+        fsm.set_event(events::end_token(std::move(*this)));
+    }
+
+    template<typename StateMachine>
+    void reenter(StateMachine &fsm)
+    {
+        enter(fsm);
+    }
+};
+
+}   // namespace detail
 
 
 // Each state is implemented in a structure and can hold state
@@ -185,11 +277,11 @@ namespace states {
 struct state_machine;
 using namespace std::literals::chrono_literals;
 
-struct initialised
+class initialised
 {
 };
 
-struct error
+class error
 {
   public:
     error(std::string msg) : msg_(msg)
@@ -207,38 +299,6 @@ struct error
     std::string msg_;
 };
 
-class in_token : public detail::token_info
-{
-  public:
-    in_token(token_info &&other)
-      : token_info(std::forward<token_info>(other))
-    {
-    }
-
-    in_token(std::string_view &&expression, std::string &&token)
-      : token_info(std::forward<std::string_view>(expression), std::forward<std::string>(token))
-    {
-    }
-
-    template<typename StateMachine>
-    void enter(StateMachine &fsm)
-    {
-        if (!has_more_chars()  ||  !std::isdigit(peek())) {
-            fsm.set_event(events::end_token(std::move(*this)));
-            return;
-        }
-
-        token_ += next_char();
-        fsm.set_event(events::continue_token(std::move(*this)));
-    }
-
-    template<typename StateMachine>
-    void reenter(StateMachine &fsm)
-    {
-        enter(fsm);
-    }
-};
-
 class new_token : public detail::token_info
 {
   public:
@@ -248,30 +308,41 @@ class new_token : public detail::token_info
     }
 
     template<typename StateMachine>
+    void reenter(StateMachine &fsm)
+    {
+        enter(fsm);
+    }
+
+    template<typename StateMachine>
     void enter(StateMachine &fsm)
     {
-        if (std::isspace(peek())) {
+        if (!has_more_chars()) {
+            fsm.set_event(events::end_token(std::move(*this)));
+        }
+        else if (detail::is_space(peek())) {
             next_char(); // consume whitespace
-            if (has_more_chars())
-                fsm.set_event(events::continue_token(std::move(*this)));
-            else
-                fsm.set_event(events::initialise());
-            return;
+            fsm.set_event(events::begin_token(std::move(*this)));
         }
-
-        if (std::isdigit(peek())) {
+        else if (detail::is_numeric_token_char(peek())) {
             token_ += next_char();
-            fsm.set_event(events::continue_token(std::move(*this)));
-            return;
+            fsm.set_event(events::seen_digit(std::move(*this)));
         }
-
-        std::ostringstream err;
-        err << "A token cannot start with '" << peek() << "'";
-        fsm.set_event(events::error(err.str()));
+        else if (detail::is_operator_char(peek())) {
+            token_ += next_char();
+            fsm.set_event(events::seen_operator_char(std::move(*this)));
+        }
+        else if (detail::is_quote_char(peek())) {
+            token_ += next_char();
+            fsm.set_event(events::seen_quote(std::move(*this)));
+        }
+        else {
+            token_ += next_char();
+            fsm.set_event(events::seen_symbol_char(std::move(*this)));
+        }
     }
 };
 
-class parse : detail::expression_holder
+class parse : public detail::expression_holder
 {
   public:
     parse(std::string_view &&expression)
@@ -282,30 +353,43 @@ class parse : detail::expression_holder
     template<typename StateMachine>
     void enter(StateMachine &fsm)
     {
-        std::cout << "\n\033[92mReady to begin_parsing: \"" << expr() << "\"\033[0m\n";
+        std::cout << "\n\033[92mParsing: \"" << expr() << "\"\033[0m\n";
         fsm.set_event(events::begin_token(std::move(*this)));
     }
 };
 
-class token_complete : detail::token_info
+class token_complete : public detail::token_info
 {
   public:
-    token_complete(token_info &&other)
-      : token_info(std::forward<token_info>(other))
-    {
-    }
-
-    token_complete(std::string_view &&other)
-      : token_info(std::forward<std::string_view>(other))
-    {
-    }
-
     template<typename StateMachine>
     void enter(StateMachine &fsm)
     {
+/*
+!!! IF NUMERIC LITERAL TOKEN !!!
+*/
+        if (token_.length() > 2  &&  token_[0] == '0')
+        {
+            std::ostringstream token;
+            char *ptr = nullptr;
+            switch (token_[1]) {
+                case 'b':
+                    token << strtoll(&*token_.cbegin()+2, &ptr, 2);
+                    break;
+                case 'x':
+                    token << strtoll(&*token_.cbegin()+2, &ptr, 16);
+                    break;
+                default:
+                    token << strtoll(&*token_.cbegin()+1, &ptr, 8);
+                    break;
+            }
+            token_ = token.str();
+        }
+
 #ifdef TRACE_TOKENISER
-        std::cout << "\033[96mFound token: \033[30;46m" << token_ << "\033[0m\n";
+        if (!token_.empty())
+            std::cout << "\033[96mFound token: \033[30;46m" << token_ << "\033[0m\n";
 #endif  // TRACE_TOKENISER
+
         if (has_more_chars())
             fsm.set_event(events::begin_token(std::move(*this)));
         else
@@ -313,11 +397,75 @@ class token_complete : detail::token_info
     }
 };
 
+class in_operator_token : public detail::in_token<in_operator_token>
+{
+  public:
+    template<typename char_type>
+    bool is_valid_char(char_type ch) const
+    {
+        return detail::is_operator_char(peek());
+    }
+};
+
+class in_string_literal_token : public detail::token_info
+{
+  public:
+};
+
+class in_symbol_token : public detail::token_info
+{
+  public:
+};
+
+class in_numeric_token : public detail::in_token<in_numeric_token>
+{
+    using base_t = in_token<in_numeric_token>;
+
+  public:
+    template<typename char_type>
+    bool is_valid_char(char_type ch) const
+    {
+        if (detail::is_numeric_token_char(ch))
+            return true;
+        else if (token_.length() == 1  &&  token_[0] == '0')
+            return ch == 'b'  ||  ch == 'x';
+        else if (token_.length() > 1  &&  token_[0] == '0') {
+            if (token_[1] == 'x')
+                return detail::is_hex_digit(ch);
+            else if (token_[1] == 'b')
+                return detail::is_bin_digit(ch);
+            else if (token_[1] == 'b')
+                return detail::is_oct_digit(ch);
+        }
+        return false;
+    }
+
+    template<typename StateMachine>
+    void enter(StateMachine &fsm)
+    {
+        if (has_more_chars()  &&  token_.length() == 1  &&  token_[0] == '0') {
+            switch (peek())   //!!TODO
+            {
+                case 'x':   // Hex
+                case 'b':   // Binary
+                    token_ += next_char();
+                    break;
+            }
+        }
+
+        base_t::enter(fsm);
+    }
+};
+
+
 using type = std::variant<
     initialised,   // initial state
     parse,
     new_token,
-    in_token,
+    in_numeric_token,
+    in_operator_token,
+    in_string_literal_token,
+    in_symbol_token,
     token_complete,
     error
 >;
@@ -344,22 +492,48 @@ class tokeniser_state_machine
         return states::parse(parse.expr());
     }
 
-    states::type on_event(auto &&, events::begin_token &&event)
+    states::type on_event(states::new_token &&, events::seen_digit &&event)
+    {
+        return states::in_numeric_token(std::forward<decltype(event)>(event));
+    }
+
+    states::type on_event(states::new_token &&, events::seen_operator_char &&event)
+    {
+        return states::in_operator_token(std::forward<decltype(event)>(event));
+    }
+
+    states::type on_event(states::new_token &&, events::seen_quote &&event)
+    {
+        return states::in_string_literal_token(std::forward<decltype(event)>(event));
+    }
+
+    states::type on_event(states::new_token &&, events::seen_symbol_char &&event)
+    {
+        return states::in_symbol_token(std::forward<decltype(event)>(event));
+    }
+
+    states::type on_event(auto &&state, events::continue_token &&event)
+    {
+        using state_t = decltype(state);
+        return state_t(event);
+    }
+
+    states::type on_event(auto &&, events::end_token &&event)
+    {
+        return states::token_complete(std::forward<decltype(event)>(event));
+    }
+
+    states::type on_event(states::parse &&, events::begin_token &&event)
     {
         return states::new_token(std::forward<decltype(event)>(event));
     }
 
-    states::type on_event(states::new_token &&, events::continue_token &&event)
+    states::type on_event(states::new_token &&state, events::begin_token &&event)
     {
-        return states::in_token(std::forward<decltype(event)>(event));
+        return states::new_token(std::forward<decltype(event)>(event));
     }
 
-    states::type on_event(states::in_token &&state, events::continue_token &&event)
-    {
-        return states::in_token(std::forward<decltype(event)>(event));
-    }
-
-    states::type on_event(states::in_token &&state, events::end_token &&event)
+    states::type on_event(states::new_token &&state, events::end_token &&event)
     {
         return states::token_complete(std::forward<decltype(event)>(event));
     }
@@ -381,11 +555,15 @@ void run()
     tokeniser_state_machine tokeniser;
 
     std::vector<std::string> expressions = {
-        "10032",
-        "100 ",
-        " 100",
-        " 123 100 ",
-        "100*0x2+ 0b11 / 19.234\t- 29^2",
+        "12345",
+        "678 ",
+        " 90",
+        " 123 456 ",
+        "0x38afe",  // hex
+        "0b101001", // binary
+        "01723",    // octal
+        " 123x",    // Invalid
+        "123*0x2+ 0b10 / 19.234\t- 29^2",
     };
     for (auto expr : expressions)
         tokeniser.set_event(events::begin_parsing(expr));
