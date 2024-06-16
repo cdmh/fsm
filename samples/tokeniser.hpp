@@ -116,6 +116,11 @@ class expression_holder
         return *next_;
     }
 
+    std::string_view::const_iterator const next() noexcept
+    {
+        return next_++;
+    }
+
     std::string_view::value_type const next_char() noexcept
     {
         return *next_++;
@@ -145,18 +150,13 @@ class token_holder
     token_holder(token_holder const &)            = delete;
     token_holder &operator=(token_holder const &) = delete;
 
-    token_holder(std::string &&token) noexcept
-        : token_(std::forward<std::string>(token))
+    token_holder(std::string_view token) noexcept
+      : token_(token)
     {
-    }
-
-    std::string &&extract_token() noexcept
-    {
-        return std::move(token_);
     }
 
   protected:
-    std::string token_;
+    std::string_view token_;
 };
 
 class token_info : public expression_holder, public token_holder
@@ -170,20 +170,17 @@ class token_info : public expression_holder, public token_holder
     };
 
   public:
-    token_info(std::string_view &&expression)
-      : expression_holder(std::forward<std::string_view>(expression))
-    {
-    }
-
     token_info(expression_holder &&expression)
       : expression_holder(std::forward<expression_holder>(expression))
     {
     }
 
-    token_info(std::string_view &&expression, std::string &&token)
-      : expression_holder(std::forward<std::string_view>(expression)),
-        token_holder(std::forward<std::string>(token))
+    void extend_token()
     {
+        auto begin = token_.empty()? &*next_ : &*token_.cbegin();
+        auto end   = (&*next_)+1;
+        ++next_;
+        token_ = std::string_view(begin, end);
     }
 
   public:
@@ -266,7 +263,7 @@ class in_token : public token_info
             }
 
             if (reinterpret_cast<Derived *>(this)->is_valid_char(peek())) {
-                token_ += next_char();
+                extend_token();
                 fsm.set_event(events::continue_token(std::move(*this)));
                 return;
             }
@@ -341,19 +338,19 @@ class new_token : public detail::token_info
             fsm.set_event(events::begin_token(std::move(*this)));
         }
         else if (detail::is_numeric_token_char(peek())) {
-            token_ += next_char();
+            extend_token();
             fsm.set_event(events::seen_digit(std::move(*this)));
         }
         else if (detail::is_operator_char(peek())) {
-            token_ += next_char();
+            extend_token();
             fsm.set_event(events::seen_operator_char(std::move(*this)));
         }
         else if (detail::is_quote_char(peek())) {
-            token_ += next_char();
+            extend_token();
             fsm.set_event(events::seen_quote(std::move(*this)));
         }
         else {
-            token_ += next_char();
+            extend_token();
             fsm.set_event(events::seen_symbol_char(std::move(*this)));
         }
     }
@@ -381,25 +378,6 @@ class token_complete : public detail::token_info
     template<typename StateMachine>
     void enter(StateMachine &fsm)
     {
-        if (token_type_ == token_type::numeric_literal
-        &&  token_.length() > 2  &&  token_[0] == '0')
-        {
-            std::ostringstream token;
-            char *ptr = nullptr;
-            switch (token_[1]) {
-                case 'b':
-                    token << strtoll(&*token_.cbegin()+2, &ptr, 2);
-                    break;
-                case 'x':
-                    token << strtoll(&*token_.cbegin()+2, &ptr, 16);
-                    break;
-                default:
-                    token << strtoll(&*token_.cbegin()+1, &ptr, 8);
-                    break;
-            }
-            token_ = token.str();
-        }
-
 #ifdef TRACE_TOKENISER
         if (!token_.empty())
         {
@@ -421,7 +399,24 @@ class token_complete : public detail::token_info
                     std::cout << "UNDEFINED";
                     break;
             }
-            std::cout << "] \033[30;46m" << token_ << "\033[0m\n";
+            std::cout << "] \033[30;46m" << token_ << "\033[0m";
+            if (token_type_ == token_type::numeric_literal
+            &&  token_.length() > 2  &&  token_[0] == '0')
+            {
+                char *ptr = nullptr;
+                switch (token_[1]) {
+                    case 'b':
+                        std::cout << " (binary, decimal value " << strtoll(&*token_.cbegin()+2, &ptr, 2) << ')';
+                        break;
+                    case 'x':
+                        std::cout << " (hex, decimal value " << strtoll(&*token_.cbegin()+2, &ptr, 16) << ')';
+                        break;
+                    default:
+                        std::cout << " (octal, decimal value " << strtoll(&*token_.cbegin() + 1, &ptr, 8) << ')';
+                        break;
+                }
+            }
+            std::cout << "\n";
         }
 #endif  // TRACE_TOKENISER
 
@@ -502,7 +497,7 @@ class in_numeric_token : public detail::in_token<in_numeric_token>
             {
                 case 'x':   // Hex
                 case 'b':   // Binary
-                    token_ += next_char();
+                    extend_token();
                     break;
             }
         }
@@ -613,10 +608,10 @@ void run()
         "678 ",
         " 90",
         " 123 456 ",
-        "0x38afe",  // hex
-        "0b101001", // binary
-        "01723",    // octal
-        " 123x",    // Invalid
+        "0x38afe",      // hex
+        "0b101001",     // binary
+        "01723",        // octal
+        " 123x 45 678", // Invalid
         "123*0x2+ 0b10 / 19.234\t- 29^2",
     };
     for (auto expr : expressions)
