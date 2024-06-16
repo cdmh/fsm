@@ -4,9 +4,7 @@
 #include <thread>
 #include <type_traits>
 #include <variant>
-#ifndef NDEBUG
 #include <iostream>
-#endif  // NDEBUG
 
 namespace fsm {
 

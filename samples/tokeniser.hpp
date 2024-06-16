@@ -1,7 +1,6 @@
 #pragma once
 
 #include "include/fsm.hpp"
-#include <iostream>
 #include <sstream>
 #include <array>
 
@@ -167,6 +166,7 @@ class token_info : public expression_holder, public token_holder
         numeric_literal,
         string_literal,
         operator_type,
+        symbol,
     };
 
   public:
@@ -367,7 +367,9 @@ class parse : public detail::expression_holder
     template<typename StateMachine>
     void enter(StateMachine &fsm)
     {
+#if TRACE_TOKENISER  ||  TRACE_TOKENS
         std::cout << "\n\033[92mParsing: \"" << expr() << "\"\033[0m\n";
+#endif  // TRACE_TOKENISER
         fsm.set_event(events::begin_token(std::move(*this)));
     }
 };
@@ -378,7 +380,7 @@ class token_complete : public detail::token_info
     template<typename StateMachine>
     void enter(StateMachine &fsm)
     {
-#ifdef TRACE_TOKENISER
+#if TRACE_TOKENISER  ||  TRACE_TOKENS
         if (!token_.empty())
         {
             std::cout << "\033[96mFound token: \033[0m[";
@@ -395,13 +397,16 @@ class token_complete : public detail::token_info
                 case token_type::operator_type:
                     std::cout << "operator";
                     break;
+                case token_type::symbol:
+                    std::cout << "symbol";
+                    break;
                 default:
                     std::cout << "UNDEFINED";
                     break;
             }
             std::cout << "] \033[30;46m" << token_ << "\033[0m";
             if (token_type_ == token_type::numeric_literal
-            &&  token_.length() > 2  &&  token_[0] == '0')
+            &&  token_.length() > 1  &&  token_[0] == '0')
             {
                 char *ptr = nullptr;
                 switch (token_[1]) {
@@ -454,14 +459,42 @@ class in_operator_token : public detail::in_token<in_operator_token>
     }
 };
 
-class in_string_literal_token : public detail::token_info
+class in_string_literal_token : public detail::in_token<in_string_literal_token>
 {
   public:
+    template<typename char_type>
+    bool is_valid_char(char_type ch)
+    {
+        if (ch == token_[0]) {
+            extend_token();
+            return false;
+        }
+        return true;
+    }
+
+    template<typename StateMachine>
+    void enter(StateMachine &fsm)
+    {
+        token_type_ = token_type::string_literal;
+        in_token::enter(fsm);
+    }
 };
 
-class in_symbol_token : public detail::token_info
+class in_symbol_token : public detail::in_token<in_symbol_token>
 {
   public:
+    template<typename char_type>
+    bool is_valid_char(char_type ch) const
+    {
+        return detail::is_valid_token_char(ch);
+    }
+
+    template<typename StateMachine>
+    void enter(StateMachine &fsm)
+    {
+        token_type_ = token_type::symbol;
+        in_token::enter(fsm);
+    }
 };
 
 class in_numeric_token : public detail::in_token<in_numeric_token>
@@ -604,6 +637,8 @@ void run()
     tokeniser_state_machine tokeniser;
 
     std::vector<std::string> expressions = {
+        "2.5",
+        "01",           // octal
         "12345",
         "678 ",
         " 90",
@@ -623,9 +658,9 @@ void run()
         std::string expression;
         std::getline(std::cin, expression);
 
-        if (expression == "q\n"  ||  expression == "Q\n")
+        if (expression == "q"  ||  expression == "Q")
             quit = true;
-        else
+        else if (!expression.empty())
             tokeniser.set_event(
                 events::begin_parsing(
                     std::string_view(
