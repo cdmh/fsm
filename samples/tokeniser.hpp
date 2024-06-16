@@ -502,14 +502,27 @@ class in_numeric_token : public detail::in_token<in_numeric_token>
     using base_t = in_token<in_numeric_token>;
 
   public:
-    template<typename char_type>
-    bool is_valid_char(char_type ch) const
+    in_numeric_token(events::seen_digit &&other)
+      : in_token(std::forward<events::seen_digit>(other))
     {
+    }
+
+  //!!! this should be more states
+    template<typename char_type>
+    bool is_valid_char(char_type ch)
+    {
+        if (token_.length() == 1  &&  token_[0] == '0') {
+            if (ch == 'b'  ||  ch == 'x'  ||  detail::is_oct_digit(ch)) {
+                decimal_allowed = false;
+                return true;
+            }
+            return (decimal_allowed  &&  ch == '.');
+        }
+        else if (decimal_allowed  &&  ch == '.')
+            return true;
         if (detail::is_numeric_token_char(ch))
             return true;
-        else if (token_.length() == 1  &&  token_[0] == '0')
-            return ch == 'b'  ||  ch == 'x';
-        else if (token_.length() > 1  &&  token_[0] == '0') {
+        if (token_[0] == '0') {
             if (token_[1] == 'x')
                 return detail::is_hex_digit(ch);
             else if (token_[1] == 'b')
@@ -517,6 +530,7 @@ class in_numeric_token : public detail::in_token<in_numeric_token>
             else if (token_[1] == 'b')
                 return detail::is_oct_digit(ch);
         }
+
         return false;
     }
 
@@ -526,7 +540,7 @@ class in_numeric_token : public detail::in_token<in_numeric_token>
         token_type_ = token_type::numeric_literal;
 
         if (has_more_chars()  &&  token_.length() == 1  &&  token_[0] == '0') {
-            switch (peek())   //!!TODO
+            switch (peek())
             {
                 case 'x':   // Hex
                 case 'b':   // Binary
@@ -537,6 +551,9 @@ class in_numeric_token : public detail::in_token<in_numeric_token>
 
         base_t::enter(fsm);
     }
+
+  private:
+    bool decimal_allowed = true;
 };
 
 
@@ -638,6 +655,7 @@ void run()
 
     std::vector<std::string> expressions = {
         "2.5",
+        ".5",
         "01",           // octal
         "12345",
         "678 ",
