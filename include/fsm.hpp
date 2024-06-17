@@ -1,10 +1,10 @@
 #pragma once
 
 #include <chrono>
+#include <iostream>
 #include <thread>
 #include <type_traits>
 #include <variant>
-#include <iostream>
 
 namespace fsm {
 
