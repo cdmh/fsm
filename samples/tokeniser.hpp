@@ -111,7 +111,7 @@ class expression_holder
     {
     }
 
-    std::string_view::value_type const peek() const noexcept
+    std::string_view::value_type const &peek() const noexcept
     {
         return *next_;
     }
@@ -131,7 +131,7 @@ class expression_holder
         return std::distance(expr_.cbegin(), next_);
     }
 
-  protected://!!!
+  private:
     std::string_view                 expr_;
     std::string_view::const_iterator next_;
 };
@@ -177,10 +177,16 @@ class token_info : public expression_holder, public token_holder
 
     void extend_token()
     {
-        auto begin = token_.empty()? &*next_ : &*token_.cbegin();
-        auto end   = (&*next_)+1;
-        ++next_;
+        auto start = &(peek());
+        auto begin = token_.empty()? start : &*token_.cbegin();
+        auto end   = start+1;
+        next_char();
         token_ = std::string_view(begin, end);
+    }
+
+    void reset_token()
+    {
+        token_ = std::string_view();
     }
 
   public:
@@ -221,6 +227,7 @@ struct begin_token        : public detail::expression_holder { };
 struct continue_token     : public detail::token_info        { };
 struct end_token          : public detail::token_info        { };
 struct seen_digit         : public detail::token_info        { };
+struct seen_exponent      : public detail::token_info        { };
 struct seen_leading_zero  : public detail::token_info        { };
 struct seen_operator_char : public detail::token_info        { };
 struct seen_quote         : public detail::token_info        { };
@@ -239,6 +246,7 @@ using type = std::variant<
     error,
     initialise,
     seen_digit,
+    seen_exponent,
     seen_leading_zero,
     seen_operator_char,
     seen_quote,
@@ -342,31 +350,22 @@ class new_token : public detail::token_info
             next_char(); // consume whitespace
             fsm.set_event(events::begin_token(std::move(*this)));
         }
-        else if (peek() == '.') {
-            extend_token();
-            fsm.set_event(events::to_dec_literal(std::move(*this)));
-        }
-        else if (detail::is_numeric_digit(peek())) {
-            if (peek() == '0') {
-                next_char(); // consume leading zero
-                fsm.set_event(events::seen_leading_zero(std::move(*this)));
-            }
-            else {
-                extend_token();
-                fsm.set_event(events::seen_digit(std::move(*this)));
-            }
-        }
-        else if (detail::is_operator_char(peek())) {
-            extend_token();
-            fsm.set_event(events::seen_operator_char(std::move(*this)));
-        }
-        else if (detail::is_quote_char(peek())) {
-            extend_token();
-            fsm.set_event(events::seen_quote(std::move(*this)));
-        }
         else {
+            auto const ch = peek();
             extend_token();
-            fsm.set_event(events::seen_symbol_char(std::move(*this)));
+
+            if (ch == '.')
+                fsm.set_event(events::to_dec_literal(std::move(*this)));
+            else if (ch == '0')
+                fsm.set_event(events::seen_leading_zero(std::move(*this)));
+            else if (detail::is_numeric_digit(ch))
+                fsm.set_event(events::seen_digit(std::move(*this)));
+            else if (detail::is_operator_char(ch))
+                fsm.set_event(events::seen_operator_char(std::move(*this)));
+            else if (detail::is_quote_char(ch))
+                fsm.set_event(events::seen_quote(std::move(*this)));
+            else
+                fsm.set_event(events::seen_symbol_char(std::move(*this)));
         }
     }
 };
@@ -395,10 +394,30 @@ class token_complete : public detail::token_info
     template<typename StateMachine>
     void enter(StateMachine &fsm)
     {
+        if (has_more_chars()
+        &&  token_type_ != token_type::operator_type
+        &&  !detail::is_token_separator(peek()))
+        {
+            std::ostringstream msg;
+            msg << "Invalid character: '" << peek() << "' in \"" << expr() << "\" at position " << position();
+            fsm.set_event(events::error(msg.str()));
+            return;
+        }
+        
+        write_token_info();
+
+        if (has_more_chars())
+            fsm.set_event(events::begin_token(std::move(*this)));
+        else
+            fsm.set_event(events::initialise());
+    }
+
+    void write_token_info() const
+    {
 #if TRACE_TOKENISER  ||  TRACE_TOKENS
         if (!token_.empty())
         {
-            std::cout << "\033[96mFound token: \033[0m[";
+            std::cout << "\033[96m" << expr() << "\033[0m\t[";
             switch (token_type_) {
                 case token_type::unknown:
                     std::cout << "unknown type";
@@ -439,6 +458,15 @@ class token_complete : public detail::token_info
                     std::cout << " (binary, decimal value " << strtoll(&*token_.cbegin(), &ptr, 2) << ')';
                     break;
                 }
+                case token_type::dec_literal:
+                {
+                    std::string token(token_);
+                    std::istringstream iss(token);
+                    double value;
+                    iss >> value;
+                    std::cout << " (decimal value " << value << ')';
+                    break;
+                }
                 case token_type::hex_literal:
                 {
                     char* ptr = nullptr;
@@ -455,21 +483,6 @@ class token_complete : public detail::token_info
             std::cout << "\n";
         }
 #endif  // TRACE_TOKENISER
-
-        if (has_more_chars()) {
-            if (token_type_ == token_type::operator_type
-            ||  detail::is_token_separator(peek()))
-            {
-                fsm.set_event(events::begin_token(std::move(*this)));
-            }
-            else {
-                std::ostringstream msg;
-                msg << "Invalid character: '" << peek() << "' in \"" << expr() << "\" at position " << position();
-                fsm.set_event(events::error(msg.str()));
-            }
-        }
-        else
-            fsm.set_event(events::initialise());
     }
 };
 
@@ -528,10 +541,28 @@ class in_symbol_token : public detail::in_token<in_symbol_token>
     }
 };
 
+class in_exponent: public detail::in_token<in_exponent>
+{
+  public:
+    template<typename CharType>
+    bool is_valid_char(CharType ch) const
+    {
+        // allow a sign for the exponent
+        if (*token_.crbegin() == 'e'  &&  (ch == '-'  ||  ch == '+'))
+            return true;
+        return detail::is_numeric_digit(ch);
+    }
+
+    template<typename StateMachine>
+    void enter(StateMachine &fsm)
+    {
+        token_type_ = token_type::dec_literal;
+        in_token::enter(fsm);
+    }
+};
+
 class in_numeric_token : public detail::in_token<in_numeric_token>
 {
-    using base_t = in_token<in_numeric_token>;
-
   public:
     template<typename StateMachine>
     void enter(StateMachine &fsm)
@@ -542,6 +573,12 @@ class in_numeric_token : public detail::in_token<in_numeric_token>
             if (peek() == '.') {
                 extend_token();
                 fsm.set_event(events::to_dec_literal(std::move(*this)));
+                return;
+            }
+
+            if (peek() == 'e'  ||  peek() == 'E') {
+                extend_token();
+                fsm.set_event(events::seen_exponent(std::move(*this)));
                 return;
             }
 
@@ -573,17 +610,29 @@ class in_numeric_base_token : public detail::in_token<in_numeric_base_token>
     template<typename StateMachine>
     void enter(StateMachine &fsm)
     {
+        assert(token_.length() == 1  &&  token_[0] == '0');
+
         if (peek() == 'b') {
+            // clear the leading 0 and skip the base indicator
+            reset_token();
             next_char();
             fsm.set_event(events::to_bin_literal(std::move(*this)));
             return;
         }
         else if (peek() == 'x') {
+            // clear the leading 0 and skip the base indicator
+            reset_token();
             next_char();
             fsm.set_event(events::to_hex_literal(std::move(*this)));
             return;
         }
+        else if (peek() == 'e'  ||  peek() == 'E') {
+            extend_token();
+            fsm.set_event(events::seen_exponent(std::move(*this)));
+            return;
+        }
         else if (peek() == '.') {
+            extend_token();
             fsm.set_event(events::to_dec_literal(std::move(*this)));
             return;
         }
@@ -622,14 +671,21 @@ class in_dec_literal : public detail::in_token<in_dec_literal>
     void enter(StateMachine &fsm)
     {
         token_type_ = token_type::dec_literal;
-        if (has_more_chars()  &&  peek() == '.')
-        {
-            std::ostringstream msg;
-            msg << "Invalid character: '" << peek() << "' in \"" << expr() << "\" at position " << position();
-            fsm.set_event(events::error(msg.str()));
+
+        if (has_more_chars()) {
+            if (peek() == 'e'  ||  peek() == 'E') {
+                extend_token();
+                fsm.set_event(events::seen_exponent(std::move(*this)));
+                return;
+            }
+            else if (peek() == '.') {
+                std::ostringstream msg;
+                msg << "Invalid character: '" << peek() << "' in \"" << expr() << "\" at position " << position();
+                fsm.set_event(events::error(msg.str()));
+                return;
+            }
         }
-        else
-            in_token::enter(fsm);
+        in_token::enter(fsm);
     }
 };
 
@@ -675,6 +731,7 @@ using type = std::variant<
     error,
     in_bin_literal,
     in_dec_literal,
+    in_exponent,
     in_hex_literal,
     in_numeric_base_token,
     in_numeric_token,
@@ -694,10 +751,8 @@ class tokeniser_state_machine
     : public fsm::state_machine<tokeniser_state_machine, states::type, events::type, TRACE_TOKENISER==1>
 {
   public:
-    using base_t = fsm::state_machine<tokeniser_state_machine, states::type, events::type, TRACE_TOKENISER==1>;
-
     // enable default processing for undefined state/event pairs
-    using base_t::on_event;
+    using fsm::state_machine<tokeniser_state_machine, states::type, events::type, TRACE_TOKENISER==1>::on_event;
 
     states::type on_event(auto &&, events::initialise &&)
     {
@@ -795,6 +850,21 @@ class tokeniser_state_machine
         return states::in_oct_literal(std::forward<decltype(event)>(event));
     }
 
+    states::type on_event(states::in_dec_literal &&, events::seen_exponent &&event)
+    {
+        return states::in_exponent(std::forward<decltype(event)>(event));
+    }
+
+    states::type on_event(states::in_numeric_token &&, events::seen_exponent &&event)
+    {
+        return states::in_exponent(std::forward<decltype(event)>(event));
+    }
+
+    states::type on_event(states::in_numeric_base_token &&, events::seen_exponent &&event)
+    {
+        return states::in_exponent(std::forward<decltype(event)>(event));
+    }
+
     states::type on_event(auto &&, events::error &&event)
     {
         std::cout << "\033[91mERROR: " << event.what() << "\033[0m\n";
@@ -807,6 +877,12 @@ void run()
     tokeniser_state_machine tokeniser;
 
     std::vector<std::string> expressions = {
+        "0.3",
+        "4e3",
+        ".3e4",
+        "0e3",
+        ".1e-12",
+        ".1e+8",
         "12.5",
         "2.5",
         ".5",
