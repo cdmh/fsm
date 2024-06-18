@@ -68,13 +68,13 @@ class state_machine
             new_state);
     }
 
-    template<typename Fn>
-    void async_wait_for_state(state_t const &state, Fn fn) const
+    template<typename State, typename Fn>
+    void async_wait_for_state(Fn fn) const
     {
         using namespace std::literals::chrono_literals;
 
-        std::thread([this, &state, fn] {
-            while (current_state_.index() != state.index())
+        std::thread([this, fn] {
+            while (!std::holds_alternative<State>(current_state_))
                 std::this_thread::sleep_for(10ms);
             fn();
         }).detach();

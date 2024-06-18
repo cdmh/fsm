@@ -151,8 +151,7 @@ struct amber_flash_button_pressed
         using namespace std::literals::chrono_literals;
 
         std::cout << "Amber is flashing. Button press has been queued\n";
-        fsm.async_wait_for_state(
-            states::green(),
+        fsm.async_wait_for_state<states::green>(
             [&fsm](){
                 fsm.set_event(events::press_button());
             });

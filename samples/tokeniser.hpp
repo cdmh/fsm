@@ -887,17 +887,19 @@ void run()
         "2.5",
         ".5",
         "5.",
-        "1234.6789.2",  // invalid
         "01",           // octal
         "12345",
         "678 ",
         " 90",
         " 123 456 ",
+        "1+2",
         "0x38afe",      // hex
         "0b101001",     // binary
         "01723",        // octal
-        " 123x 45 678", // Invalid
         "123*0x2+ 0b10 / 19.234\t- 29^2",
+        // invalids
+        "1234.6789.2",
+        " 123x 45 678",
     };
     for (auto expr : expressions)
         tokeniser.set_event(events::begin_parsing(expr));
@@ -910,12 +912,14 @@ void run()
 
         if (expression == "q"  ||  expression == "Q")
             quit = true;
-        else if (!expression.empty())
+        else if (!expression.empty()) {
             tokeniser.set_event(
                 events::begin_parsing(
                     std::string_view(
                         expression.cbegin(),
                         expression.cend())));
+            tokeniser.async_wait_for_state<states::token_complete>([](){});
+        }
     }
 }
 
