@@ -28,6 +28,16 @@ class expression_holder
         return expr_;
     }
 
+    int64_t const line() const noexcept
+    {
+        return line_;
+    }
+
+    int64_t const column() const noexcept
+    {
+        return column_;
+    }
+
   protected:
     expression_holder(std::string_view &&expression) noexcept
         : expr_(std::forward<std::string_view>(expression)),
@@ -42,7 +52,14 @@ class expression_holder
 
     std::string_view::value_type const next_char() noexcept
     {
+        ++column_;
         return *next_++;
+    }
+
+    uint64_t const on_next_line() noexcept
+    {
+        column_ = 0;
+        return ++line_;
     }
 
     bool const has_more_chars() const noexcept
@@ -58,6 +75,8 @@ class expression_holder
   private:
     std::string_view                 expr_;
     std::string_view::const_iterator next_;
+    int64_t                          line_   = 1;
+    int64_t                          column_ = 0;
 };
 
 class token_holder
@@ -127,11 +146,17 @@ class token_info : public expression_holder, public token_holder
 // Event are transitions between states
 namespace events {
 
-class error
+class error : public detail::expression_holder
 {
   public:
-    error(std::string msg) : msg_(msg)
+    error(expression_holder &&other)
+      : expression_holder(std::forward<expression_holder>(other))
     {
+    }
+
+    void set_message(std::string msg)
+    {
+        msg_ = msg;
     }
 
     char const * const what() const noexcept
@@ -158,6 +183,7 @@ struct end_token          : public detail::token_info        { };
 struct seen_digit         : public detail::token_info        { };
 struct seen_exponent      : public detail::token_info        { };
 struct seen_leading_zero  : public detail::token_info        { };
+struct seen_newline       : public detail::token_info        { };
 struct seen_operator_char : public detail::token_info        { };
 struct seen_quote         : public detail::token_info        { };
 struct seen_symbol_char   : public detail::token_info        { };
@@ -177,6 +203,7 @@ using type = std::variant<
     seen_digit,
     seen_exponent,
     seen_leading_zero,
+    seen_newline,
     seen_operator_char,
     seen_quote,
     seen_symbol_char,
@@ -237,13 +264,9 @@ class initialised
 {
 };
 
-class error
+class error : public detail::expression_holder
 {
   public:
-    error(std::string msg) : msg_(msg)
-    {
-    }
-
     template<typename StateMachine>
     void enter(StateMachine &fsm)
     {
@@ -253,6 +276,17 @@ class error
 
   private:
     std::string msg_;
+};
+
+class new_line : public detail::token_info
+{
+  public:
+    template<typename StateMachine>
+    void enter(StateMachine &fsm)
+    {
+        on_next_line();
+        fsm.set_event(events::begin_token(std::move(*this)));
+    }
 };
 
 class new_token : public detail::token_info
@@ -274,6 +308,10 @@ class new_token : public detail::token_info
     {
         if (!has_more_chars()) {
             fsm.set_event(events::end_token(std::move(*this)));
+        }
+        else if (peek() == '\n') {
+            next_char(); // consume whitespace
+            fsm.set_event(events::seen_newline(std::move(*this)));
         }
         else if (fsm.is_space(peek())) {
             next_char(); // consume whitespace
@@ -332,8 +370,10 @@ class token_complete : public detail::token_info
         &&  !fsm.is_token_separator(peek()))
         {
             std::ostringstream msg;
-            msg << "Invalid character: '" << peek() << "' in \"" << expr() << "\" at position " << position();
-            fsm.set_event(events::error(msg.str()));
+            msg << "Invalid character: '" << next_char() << "' in \"" << expr() << "\" at position " << position();
+            events::error err(std::move(*this));
+            err.set_message(msg.str());
+            fsm.set_event(std::move(err));
             return;
         }
         
@@ -634,8 +674,10 @@ class in_dec_literal : public detail::in_token<in_dec_literal>
             }
             else if (peek() == '.') {
                 std::ostringstream msg;
-                msg << "Invalid character: '" << peek() << "' in \"" << expr() << "\" at position " << position();
-                fsm.set_event(events::error(msg.str()));
+                msg << "Invalid character: '" << next_char() << "' in \"" << expr() << "\" at position " << position();
+                events::error err(std::move(*this));
+                err.set_message(msg.str());
+                fsm.set_event(std::move(err));
                 return;
             }
         }
@@ -693,6 +735,7 @@ using type = std::variant<
     in_operator_token,
     in_string_literal_token,
     in_symbol_token,
+    new_line,
     new_token,
     parse,
     token_complete
@@ -816,6 +859,11 @@ class tokeniser_state_machine_generic
         return states::in_symbol_token(std::forward<decltype(event)>(event));
     }
 
+    states::type on_event(states::new_token &&, events::seen_newline &&event)
+    {
+        return states::new_line(std::forward<decltype(event)>(event));
+    }
+
     states::type on_event(auto &&state, events::continue_token &&event)
     {
         using state_t = decltype(state);
@@ -842,6 +890,16 @@ class tokeniser_state_machine_generic
         return states::token_complete(std::forward<decltype(event)>(event));
     }
 
+    states::type on_event(states::new_token &&, events::to_dec_literal &&event)
+    {
+        return states::in_dec_literal(std::forward<decltype(event)>(event));
+    }
+
+    states::type on_event(states::new_line &&state, events::begin_token &&event)
+    {
+        return states::new_token(std::forward<decltype(event)>(event));
+    }
+
     states::type on_event(states::token_complete &&state, events::begin_token &&event)
     {
         return states::new_token(std::forward<decltype(event)>(event));
@@ -857,16 +915,6 @@ class tokeniser_state_machine_generic
         return states::in_dec_literal(std::forward<decltype(event)>(event));
     }
 
-    states::type on_event(states::in_numeric_token &&, events::to_dec_literal &&event)
-    {
-        return states::in_dec_literal(std::forward<decltype(event)>(event));
-    }
-
-    states::type on_event(states::new_token &&, events::to_dec_literal &&event)
-    {
-        return states::in_dec_literal(std::forward<decltype(event)>(event));
-    }
-
     states::type on_event(states::in_numeric_base_token &&, events::to_hex_literal &&event)
     {
         return states::in_hex_literal(std::forward<decltype(event)>(event));
@@ -877,9 +925,14 @@ class tokeniser_state_machine_generic
         return states::in_oct_literal(std::forward<decltype(event)>(event));
     }
 
-    states::type on_event(states::in_dec_literal &&, events::seen_exponent &&event)
+    states::type on_event(states::in_numeric_base_token &&, events::seen_exponent &&event)
     {
         return states::in_exponent(std::forward<decltype(event)>(event));
+    }
+
+    states::type on_event(states::in_numeric_token &&, events::to_dec_literal &&event)
+    {
+        return states::in_dec_literal(std::forward<decltype(event)>(event));
     }
 
     states::type on_event(states::in_numeric_token &&, events::seen_exponent &&event)
@@ -887,14 +940,14 @@ class tokeniser_state_machine_generic
         return states::in_exponent(std::forward<decltype(event)>(event));
     }
 
-    states::type on_event(states::in_numeric_base_token &&, events::seen_exponent &&event)
+    states::type on_event(states::in_dec_literal &&, events::seen_exponent &&event)
     {
         return states::in_exponent(std::forward<decltype(event)>(event));
     }
 
     states::type on_event(auto &&, events::error &&event)
     {
-        std::cout << "\033[91mERROR: " << event.what() << "\033[0m\n";
+        std::cout << "\033[91mERROR on line " << event.line() << ", column " << event.column() << ": " << event.what() << "\033[0m\n";
         return states::initialised();
     }
 };

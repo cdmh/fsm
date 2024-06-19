@@ -104,6 +104,7 @@ void run()
         "operator<<",
         "operator>>()",
         "(*(++next))++",
+        "int main()\n{\n}",
     };
     for (auto source : cpp_source)
         cpptokeniser.set_event(tokeniser::events::begin_parsing(source));
