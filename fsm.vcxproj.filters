@@ -32,5 +32,8 @@
     <ClInclude Include="samples\tokeniser.hpp">
       <Filter>Header Files\samples</Filter>
     </ClInclude>
+    <ClInclude Include="samples\cpp_tokeniser.hpp">
+      <Filter>Header Files\samples</Filter>
+    </ClInclude>
   </ItemGroup>
 </Project>

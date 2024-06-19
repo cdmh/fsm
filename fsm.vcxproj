@@ -155,6 +155,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="include\fsm.hpp" />
+    <ClInclude Include="samples\cpp_tokeniser.hpp" />
     <ClInclude Include="samples\pedestrian_crossing.hpp" />
     <ClInclude Include="samples\tokeniser.hpp" />
   </ItemGroup>
