@@ -16,10 +16,16 @@
     <Filter Include="Header Files\samples">
       <UniqueIdentifier>{8bdfcd52-295f-4dd2-b1fe-231655ed7fb3}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Source Files\samples">
+      <UniqueIdentifier>{44cd4d31-6a36-4213-aa73-0d8fa281fc20}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="main.cpp">
       <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="samples\cpp_preprocessor.cpp">
+      <Filter>Source Files\samples</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
@@ -33,6 +39,9 @@
       <Filter>Header Files\samples</Filter>
     </ClInclude>
     <ClInclude Include="samples\cpp_tokeniser.hpp">
+      <Filter>Header Files\samples</Filter>
+    </ClInclude>
+    <ClInclude Include="samples\cpp_preprocessor.hpp">
       <Filter>Header Files\samples</Filter>
     </ClInclude>
   </ItemGroup>
