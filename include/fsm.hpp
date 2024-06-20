@@ -1,7 +1,10 @@
 #pragma once
 
 #include <chrono>
+#include <deque>
+#include <functional>   // std::bind
 #include <iostream>
+#include <mutex>
 #include <thread>
 #include <type_traits>
 #include <variant>
@@ -42,14 +45,93 @@ class state_machine
     using derived_t = Derived;
 
   public:
-    // make the state machine noncopyable, but keep it movable
-    state_machine()                                 = default;
-    state_machine(state_machine &&)                 = default;
-    state_machine &operator=(state_machine &&)      = default;
+    // make the state machine non-copyable, non-movable
+    state_machine(state_machine &&)                 = delete;
+    state_machine &operator=(state_machine &&)      = delete;
     state_machine(state_machine const &)            = delete;
     state_machine &operator=(state_machine const &) = delete;
 
+    state_machine()
+    {
+        event_thread_ = std::thread(std::bind(&state_machine::event_thread, this));
+    }
+
+    ~state_machine()
+    {
+        terminate_ = true;
+        if (event_thread_.joinable())
+            event_thread_.join();
+    }
+
     void set_event(event_t &&event)
+    {
+        std::scoped_lock lock(event_queue_mutex_);
+        event_queue_.push_back(std::forward<event_t>(event));
+    }
+
+    void wait_for_empty_event_queue() const
+    {
+        using namespace std::literals::chrono_literals;
+
+        while (true) {
+            event_queue_mutex_.lock();
+            bool empty = event_queue_.empty();
+            event_queue_mutex_.unlock();
+
+            if (empty)
+                return;
+            std::this_thread::sleep_for(5ms);
+        }
+    }
+
+    template<typename State, typename Fn>
+    void async_wait_for_state(Fn fn) const
+    {
+        using namespace std::literals::chrono_literals;
+
+        std::thread([this, fn] {
+            while (!std::holds_alternative<State>(current_state_))
+                std::this_thread::sleep_for(10ms);
+            fn();
+        }).detach();
+    }
+
+  protected:
+    void event_thread()
+    {
+        using namespace std::literals::chrono_literals;
+
+        while (!terminate_) {
+            // empty() and pop() are both noexcept, so we don't need the
+            // security of RAII, and using it would make the code less
+            // readable with redundant scope blocks
+            event_queue_mutex_.lock();
+            auto const empty = event_queue_.empty();
+            event_queue_mutex_.unlock();
+
+            if (!empty) {
+                try {
+                    // process the event, leaving it in the queue so
+                    // other threads can wait on the queue being empty
+                    // to determine processing has finished in some
+                    // implementations
+                    event_t event(std::move(event_queue_.front()));
+                    process_event(std::move(event));
+
+                    event_queue_mutex_.lock();
+                    event_queue_.pop_front();
+                    event_queue_mutex_.unlock();
+                }
+                catch (std::exception &)
+                {
+                }
+            }
+
+            std::this_thread::sleep_for(5ms);
+        }
+    }
+
+    void process_event(event_t &&event)
     {
         auto fn = [instance = reinterpret_cast<derived_t *>(this)](auto &&state, auto &&event) -> state_t {
             if constexpr (DebugTrace)
@@ -68,19 +150,6 @@ class state_machine
             new_state);
     }
 
-    template<typename State, typename Fn>
-    void async_wait_for_state(Fn fn) const
-    {
-        using namespace std::literals::chrono_literals;
-
-        std::thread([this, fn] {
-            while (!std::holds_alternative<State>(current_state_))
-                std::this_thread::sleep_for(10ms);
-            fn();
-        }).detach();
-    }
-
-  protected:
     state_t on_event(auto &&state, auto &&event)
     {
 #ifndef NDEBUG
@@ -142,7 +211,11 @@ class state_machine
     }
 
   private:
-    state_t current_state_;
+    bool                terminate_ = false;
+    state_t             current_state_;
+    std::mutex mutable  event_queue_mutex_;
+    std::thread         event_thread_;
+    std::deque<event_t> event_queue_;
 };
 
 }
