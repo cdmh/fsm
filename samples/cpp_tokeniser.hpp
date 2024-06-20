@@ -107,7 +107,7 @@ inline void run()
         "int main()\n{\n}",
     };
     for (auto source : cpp_source)
-        cpptokeniser.set_event(tokeniser::events::begin_parsing(source));
+        cpptokeniser.tokenise(source);
 
     bool quit = false;
     while (!quit)
@@ -118,11 +118,7 @@ inline void run()
         if (expression == "q"  ||  expression == "Q")
             quit = true;
         else if (!expression.empty()) {
-            cpptokeniser.set_event(
-                tokeniser::events::begin_parsing(
-                    std::string_view(
-                        expression.cbegin(),
-                        expression.cend())));
+            cpptokeniser.tokenise(expression);
             cpptokeniser.async_wait_for_state<tokeniser::states::token_complete>([](){});
         }
     }

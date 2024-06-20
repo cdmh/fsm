@@ -755,6 +755,12 @@ class tokeniser_state_machine_generic
   public:
     using base_type = fsm::state_machine<Derived, states::type, events::type, TRACE_TOKENISER==1>;
 
+    void tokenise(std::string_view str)
+    {
+        base_type::set_event(events::begin_parsing(std::move(str)));
+        base_type::wait_for_empty_event_queue();
+    }
+
     static constexpr auto valid_token_chars = make_lut("0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz_");
     static constexpr auto numeric_digits    = make_lut("0123456789");
     static constexpr auto space_chars       = make_lut(" \t\r\n\f\v");
@@ -988,7 +994,7 @@ inline void run()
 
     std::cout << "Generic tokeniser\n";
     for (auto expr : expressions)
-        tokeniser.set_event(events::begin_parsing(expr));
+        tokeniser.tokenise(expr);
 }
 
 }   // namespace tokeniser
