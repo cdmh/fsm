@@ -96,7 +96,7 @@ class cpp_tokeniser_state_machine
     };
 };
 
-void run()
+inline void run()
 {
     cpp_tokeniser_state_machine cpptokeniser;
     std::vector<std::string> cpp_source = {

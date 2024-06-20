@@ -719,9 +719,6 @@ class in_oct_literal : public detail::in_token<in_oct_literal>
     }
 };
 
-
-
-
 using type = std::variant<
     initialised,   // initial state
     error,
@@ -957,7 +954,7 @@ class state_machine : public tokeniser_state_machine_generic<state_machine>
 {
 };
 
-void run()
+inline void run()
 {
     state_machine tokeniser;
 
