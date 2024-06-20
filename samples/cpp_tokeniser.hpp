@@ -12,7 +12,7 @@ class cpp_tokeniser_state_machine
     {
         assignment, asterisk,
         binary_not, binary_not_eq, binary_or,
-        close_curly_bracket, close_paren, close_sq_bracket, colon, comma,
+        close_curly_bracket, close_paren, close_sq_bracket, colon, comma, comment,
         decrement, divide, divide_equal,
         equal,
         increment,
@@ -182,6 +182,7 @@ class cpp_tokeniser_state_machine
         { "{",  { operator_type::open_curly_bracket,  "open_curly_bracket"  } },
         { "}",  { operator_type::close_curly_bracket, "close_curly_bracket" } },
         { ":",  { operator_type::colon,               "colon"               } },
+        { "//", { operator_type::comment,             "comment"             } },
         { ";",  { operator_type::semicolon,           "semicolon"           } },
         { "&&", { operator_type::logical_and,         "logical_and"         } },
         { "||", { operator_type::logical_or,          "logical_or"          } },
