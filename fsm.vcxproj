@@ -164,6 +164,7 @@
     <ClInclude Include="samples\cpp_tokeniser.hpp" />
     <ClInclude Include="samples\pedestrian_crossing.hpp" />
     <ClInclude Include="samples\tokeniser.hpp" />
+    <ClInclude Include="samples\util\memory_mapped_file.hpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
