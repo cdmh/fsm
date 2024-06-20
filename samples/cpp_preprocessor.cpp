@@ -124,7 +124,7 @@ void run(char const * const pathname)
     }
 
     cpp_tokeniser::cpp_tokeniser_state_machine tokeniser;
-    tokeniser.set_event(tokeniser::events::begin_parsing(std::string_view(mmf, mmf.size())));
+    tokeniser.tokenise(std::string_view(mmf, mmf.size()));
 }
 
 }   // namespace cpp_preprocessor
