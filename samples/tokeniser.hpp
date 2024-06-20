@@ -102,13 +102,14 @@ class token_info : public expression_holder, public token_holder
   protected:
     enum class token_type {
         unknown,
-        numeric_literal,
         bin_literal,
         dec_literal,
         hex_literal,
+        keyword,
+        numeric_literal,
         oct_literal,
-        string_literal,
         operator_token,
+        string_literal,
         symbol,
     };
 
@@ -190,6 +191,7 @@ struct seen_symbol_char   : public detail::token_info        { };
 struct to_bin_literal     : public detail::token_info        { };
 struct to_dec_literal     : public detail::token_info        { };
 struct to_hex_literal     : public detail::token_info        { };
+struct to_keyword         : public detail::token_info        { };
 struct to_oct_literal     : public detail::token_info        { };
 
 // this variant must include all events used in the state machine
@@ -210,6 +212,7 @@ using type = std::variant<
     to_bin_literal,
     to_dec_literal,
     to_hex_literal,
+    to_keyword,
     to_oct_literal
 >;
 
@@ -423,6 +426,9 @@ class token_complete : public detail::token_info
                 case token_type::symbol:
                     std::cout << "symbol";
                     break;
+                case token_type::keyword:
+                    std::cout << "keyword";
+                    break;
                 default:
                     std::cout << "UNDEFINED";
                     break;
@@ -471,8 +477,8 @@ class in_operator_token : public detail::in_token<in_operator_token>
     {
         token_type_ = token_type::operator_token;
 
-        if constexpr (requires { fsm.greedy_operator_check(peek_extend_token()); }) {
-            if (has_more_chars()) {
+        if (has_more_chars()) {
+            if constexpr (requires { fsm.greedy_operator_check(peek_extend_token()); }) {
                 if (fsm.greedy_operator_check(peek_extend_token())) {
                     extend_token();
                     fsm.set_event(events::continue_token(std::move(*this)));
@@ -519,6 +525,31 @@ class in_symbol_token : public detail::in_token<in_symbol_token>
     void enter(StateMachine &fsm)
     {
         token_type_ = token_type::symbol;
+
+        if constexpr (requires { fsm.is_keyword(token_); }) {
+            if (fsm.is_keyword(token_)) {
+                fsm.set_event(events::to_keyword(std::move(*this)));
+                return;
+            }
+        }
+
+        in_token::enter(fsm);
+    }
+};
+
+class in_keyword_token : public detail::in_token<in_keyword_token>
+{
+  public:
+    template<typename StateMachine, typename CharType>
+    bool is_valid_char(StateMachine const &fsm, CharType ch) const
+    {
+        return fsm.is_valid_token_char(ch);
+    }
+
+    template<typename StateMachine>
+    void enter(StateMachine &fsm)
+    {
+        token_type_ = token_type::keyword;
         in_token::enter(fsm);
     }
 };
@@ -726,6 +757,7 @@ using type = std::variant<
     in_dec_literal,
     in_exponent,
     in_hex_literal,
+    in_keyword_token,
     in_numeric_base_token,
     in_numeric_token,
     in_oct_literal,
@@ -827,46 +859,6 @@ class tokeniser_state_machine_generic
     // enable default processing for undefined state/event pairs
     using base_type::on_event;
 
-    states::type on_event(auto &&, events::initialise &&)
-    {
-        return states::initialised();
-    }
-
-    states::type on_event(states::initialised &&, events::begin_parsing &&parse)
-    {
-        return states::parse(parse.expr());
-    }
-
-    states::type on_event(states::new_token &&, events::seen_digit &&event)
-    {
-        return states::in_numeric_token(std::forward<decltype(event)>(event));
-    }
-
-    states::type on_event(states::new_token &&, events::seen_leading_zero &&event)
-    {
-        return states::in_numeric_base_token(std::forward<decltype(event)>(event));
-    }
-
-    states::type on_event(states::new_token &&, events::seen_operator_char &&event)
-    {
-        return states::in_operator_token(std::forward<decltype(event)>(event));
-    }
-
-    states::type on_event(states::new_token &&, events::seen_quote &&event)
-    {
-        return states::in_string_literal_token(std::forward<decltype(event)>(event));
-    }
-
-    states::type on_event(states::new_token &&, events::seen_symbol_char &&event)
-    {
-        return states::in_symbol_token(std::forward<decltype(event)>(event));
-    }
-
-    states::type on_event(states::new_token &&, events::seen_newline &&event)
-    {
-        return states::new_line(std::forward<decltype(event)>(event));
-    }
-
     states::type on_event(auto &&state, events::continue_token &&event)
     {
         using state_t = decltype(state);
@@ -878,34 +870,25 @@ class tokeniser_state_machine_generic
         return states::token_complete(std::forward<decltype(event)>(event));
     }
 
-    states::type on_event(states::parse &&, events::begin_token &&event)
+    states::type on_event(auto &&, events::error &&event)
     {
-        return states::new_token(std::forward<decltype(event)>(event));
+        std::cout << "\033[91mERROR on line " << event.line() << ", column " << event.column() << ": " << event.what() << "\033[0m\n";
+        return states::initialised();
     }
 
-    states::type on_event(states::new_token &&state, events::begin_token &&event)
+    states::type on_event(auto &&, events::initialise &&)
     {
-        return states::new_token(std::forward<decltype(event)>(event));
+        return states::initialised();
     }
 
-    states::type on_event(states::new_token &&state, events::end_token &&event)
+    states::type on_event(states::in_dec_literal &&, events::seen_exponent &&event)
     {
-        return states::token_complete(std::forward<decltype(event)>(event));
+        return states::in_exponent(std::forward<decltype(event)>(event));
     }
 
-    states::type on_event(states::new_token &&, events::to_dec_literal &&event)
+    states::type on_event(states::initialised &&, events::begin_parsing &&parse)
     {
-        return states::in_dec_literal(std::forward<decltype(event)>(event));
-    }
-
-    states::type on_event(states::new_line &&state, events::begin_token &&event)
-    {
-        return states::new_token(std::forward<decltype(event)>(event));
-    }
-
-    states::type on_event(states::token_complete &&state, events::begin_token &&event)
-    {
-        return states::new_token(std::forward<decltype(event)>(event));
+        return states::parse(parse.expr());
     }
 
     states::type on_event(states::in_numeric_base_token &&, events::to_bin_literal &&event)
@@ -943,15 +926,69 @@ class tokeniser_state_machine_generic
         return states::in_exponent(std::forward<decltype(event)>(event));
     }
 
-    states::type on_event(states::in_dec_literal &&, events::seen_exponent &&event)
+    states::type on_event(states::new_line &&state, events::begin_token &&event)
     {
-        return states::in_exponent(std::forward<decltype(event)>(event));
+        return states::new_token(std::forward<decltype(event)>(event));
     }
 
-    states::type on_event(auto &&, events::error &&event)
+    states::type on_event(states::new_token &&, events::seen_digit &&event)
     {
-        std::cout << "\033[91mERROR on line " << event.line() << ", column " << event.column() << ": " << event.what() << "\033[0m\n";
-        return states::initialised();
+        return states::in_numeric_token(std::forward<decltype(event)>(event));
+    }
+
+    states::type on_event(states::new_token &&, events::seen_leading_zero &&event)
+    {
+        return states::in_numeric_base_token(std::forward<decltype(event)>(event));
+    }
+
+    states::type on_event(states::new_token &&, events::seen_operator_char &&event)
+    {
+        return states::in_operator_token(std::forward<decltype(event)>(event));
+    }
+
+    states::type on_event(states::new_token &&, events::seen_quote &&event)
+    {
+        return states::in_string_literal_token(std::forward<decltype(event)>(event));
+    }
+
+    states::type on_event(states::new_token &&, events::seen_symbol_char &&event)
+    {
+        return states::in_symbol_token(std::forward<decltype(event)>(event));
+    }
+
+    states::type on_event(states::new_token &&, events::seen_newline &&event)
+    {
+        return states::new_line(std::forward<decltype(event)>(event));
+    }
+
+    states::type on_event(states::new_token &&state, events::begin_token &&event)
+    {
+        return states::new_token(std::forward<decltype(event)>(event));
+    }
+
+    states::type on_event(states::new_token &&state, events::end_token &&event)
+    {
+        return states::token_complete(std::forward<decltype(event)>(event));
+    }
+
+    states::type on_event(states::new_token &&, events::to_dec_literal &&event)
+    {
+        return states::in_dec_literal(std::forward<decltype(event)>(event));
+    }
+
+    states::type on_event(states::parse &&, events::begin_token &&event)
+    {
+        return states::new_token(std::forward<decltype(event)>(event));
+    }
+
+    states::type on_event(states::in_symbol_token &&, events::to_keyword &&event)
+    {
+        return states::in_keyword_token(std::forward<decltype(event)>(event));
+    }
+
+    states::type on_event(states::token_complete &&state, events::begin_token &&event)
+    {
+        return states::new_token(std::forward<decltype(event)>(event));
     }
 };
 
