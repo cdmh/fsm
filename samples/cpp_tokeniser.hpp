@@ -4,9 +4,12 @@
 
 namespace cpp_tokeniser {
 
-class cpp_tokeniser_state_machine
-  : public tokeniser::tokeniser_state_machine_generic<cpp_tokeniser_state_machine>
+template<typename Derived>
+class cpp_tokeniser_state_machine_generic
+  : public tokeniser::tokeniser_state_machine_generic<Derived>
 {
+    using base_type = tokeniser::tokeniser_state_machine_generic<Derived>;
+
   public:
     enum class operator_type
     {
@@ -45,7 +48,7 @@ class cpp_tokeniser_state_machine
         kw_virtual, kw_void, kw_volatile,
         kw_while,
 
-        // preprocessor
+        // preprocessor_state_machine
         pp_define, pp_elif, pp_else, pp_endif, pp_error, pp_if, pp_ifdef,
         pp_ifndef, pp_import, pp_include, pp_line, pp_pragma, pp_undef,
         pp_using
@@ -53,7 +56,7 @@ class cpp_tokeniser_state_machine
     using keyword_info_type  = keyword_type;
 
 #ifdef _DEBUG
-    cpp_tokeniser_state_machine()
+    cpp_tokeniser_state_machine_generic()
     {
         for (auto op : operators_) {
             for (auto ch : op.first)
@@ -81,12 +84,12 @@ class cpp_tokeniser_state_machine
     }
 
     // use defaults for character types
-    using tokeniser_state_machine_generic<cpp_tokeniser_state_machine>::is_oct_digit;
-    using tokeniser_state_machine_generic<cpp_tokeniser_state_machine>::is_space;
-    using tokeniser_state_machine_generic<cpp_tokeniser_state_machine>::is_numeric_digit;
-    using tokeniser_state_machine_generic<cpp_tokeniser_state_machine>::is_operator_char;
-    using tokeniser_state_machine_generic<cpp_tokeniser_state_machine>::is_quote_char;
-    using tokeniser_state_machine_generic<cpp_tokeniser_state_machine>::is_token_separator;
+    using base_type::is_oct_digit;
+    using base_type::is_space;
+    using base_type::is_numeric_digit;
+    using base_type::is_operator_char;
+    using base_type::is_quote_char;
+    using base_type::is_token_separator;
 
   private:
     std::map<std::string_view, keyword_info_type> keywords_ = {
@@ -192,6 +195,11 @@ class cpp_tokeniser_state_machine
         { "--", { operator_type::decrement,           "decrement"           } },
         { "::", { operator_type::scope_resolution,    "scope_resolution"    } },
     };
+};
+
+class cpp_tokeniser_state_machine
+  : public cpp_tokeniser_state_machine_generic<cpp_tokeniser_state_machine>
+{
 };
 
 inline void run()

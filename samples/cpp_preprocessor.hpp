@@ -11,4 +11,4 @@ class cpp_preprocessor : public cpp_tokeniser::cpp_tokeniser_state_machine
 
 void run(char const * const pathname);
 
-}   // namespace cpp_preprocessor
+}   // namespace preprocessor

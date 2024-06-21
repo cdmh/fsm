@@ -20,8 +20,6 @@ class expression_holder
     expression_holder()                                     = delete;
     expression_holder(expression_holder &&)                 = default;
     expression_holder &operator=(expression_holder &&)      = default;
-    expression_holder(expression_holder const &)            = delete;
-    expression_holder &operator=(expression_holder const &) = delete;
 
     std::string_view expr() const noexcept
     {
@@ -39,6 +37,8 @@ class expression_holder
     }
 
   protected:
+    expression_holder(expression_holder const &)            = default;
+    expression_holder &operator=(expression_holder const &) = default;
     expression_holder(std::string_view &&expression) noexcept
         : expr_(std::forward<std::string_view>(expression)),
           next_(expr_.cbegin())
@@ -85,8 +85,6 @@ class token_holder
     token_holder() noexcept                       = default;
     token_holder(token_holder &&)                 = default;
     token_holder &operator=(token_holder &&)      = default;
-    token_holder(token_holder const &)            = delete;
-    token_holder &operator=(token_holder const &) = delete;
 
     token_holder(std::string_view token) noexcept
       : token_(token)
@@ -94,10 +92,16 @@ class token_holder
     }
 
   protected:
+    token_holder(token_holder const &)            = default;
+    token_holder &operator=(token_holder const &) = default;
+
+  protected:
     std::string_view token_;
 };
 
-class token_info : public expression_holder, public token_holder
+}   // namespace detail
+
+class token_info : public detail::expression_holder, public detail::token_holder
 {
   protected:
     enum class token_type {
@@ -142,8 +146,6 @@ class token_info : public expression_holder, public token_holder
     token_type token_type_ = token_type::unknown;
 };
 
-}   // namespace detail
-
 // Event are transitions between states
 namespace events {
 
@@ -179,20 +181,20 @@ struct begin_parsing : public detail::expression_holder
 
 struct initialise                                            { };
 struct begin_token        : public detail::expression_holder { };
-struct continue_token     : public detail::token_info        { };
-struct end_token          : public detail::token_info        { };
-struct seen_digit         : public detail::token_info        { };
-struct seen_exponent      : public detail::token_info        { };
-struct seen_leading_zero  : public detail::token_info        { };
-struct seen_newline       : public detail::token_info        { };
-struct seen_operator_char : public detail::token_info        { };
-struct seen_quote         : public detail::token_info        { };
-struct seen_symbol_char   : public detail::token_info        { };
-struct to_bin_literal     : public detail::token_info        { };
-struct to_dec_literal     : public detail::token_info        { };
-struct to_hex_literal     : public detail::token_info        { };
-struct to_keyword         : public detail::token_info        { };
-struct to_oct_literal     : public detail::token_info        { };
+struct continue_token     : public token_info                { };
+struct end_token          : public token_info                { };
+struct seen_digit         : public token_info                { };
+struct seen_exponent      : public token_info                { };
+struct seen_leading_zero  : public token_info                { };
+struct seen_newline       : public token_info                { };
+struct seen_operator_char : public token_info                { };
+struct seen_quote         : public token_info                { };
+struct seen_symbol_char   : public token_info                { };
+struct to_bin_literal     : public token_info                { };
+struct to_dec_literal     : public token_info                { };
+struct to_hex_literal     : public token_info                { };
+struct to_keyword         : public token_info                { };
+struct to_oct_literal     : public token_info        { };
 
 // this variant must include all events used in the state machine
 using type = std::variant<
@@ -281,7 +283,7 @@ class error : public detail::expression_holder
     std::string msg_;
 };
 
-class new_line : public detail::token_info
+class new_line : public token_info
 {
   public:
     template<typename StateMachine>
@@ -292,7 +294,7 @@ class new_line : public detail::token_info
     }
 };
 
-class new_token : public detail::token_info
+class new_token : public token_info
 {
   public:
     new_token(expression_holder &&other)
@@ -362,7 +364,7 @@ class parse : public detail::expression_holder
     }
 };
 
-class token_complete : public detail::token_info
+class token_complete : public token_info
 {
   public:
     template<typename StateMachine>
@@ -380,7 +382,11 @@ class token_complete : public detail::token_info
             return;
         }
         
-        write_token_info(fsm);
+        if constexpr (requires { write_token_info(fsm); })
+            write_token_info(fsm);
+
+        if constexpr (requires { fsm.on_token(*this); })
+            fsm.on_token(*this);
 
         if (has_more_chars())
             fsm.set_event(events::begin_token(std::move(*this)));
@@ -388,10 +394,10 @@ class token_complete : public detail::token_info
             fsm.set_event(events::initialise());
     }
 
+#if TRACE_TOKENISER  ||  TRACE_TOKENS
     template<typename StateMachine>
     void write_token_info(StateMachine &fsm) const
     {
-#if TRACE_TOKENISER  ||  TRACE_TOKENS
         if (!token_.empty())
         {
             std::cout << "\033[96m" << expr() << "\033[0m\t[";
@@ -465,8 +471,8 @@ class token_complete : public detail::token_info
             }
             std::cout << "\n";
         }
-#endif  // TRACE_TOKENISER
     }
+#endif  // TRACE_TOKENISER
 };
 
 class in_operator_token : public detail::in_token<in_operator_token>
@@ -964,11 +970,6 @@ class tokeniser_state_machine_generic
     states::type on_event(states::new_token &&state, events::begin_token &&event)
     {
         return states::new_token(std::forward<decltype(event)>(event));
-    }
-
-    states::type on_event(states::new_token &&state, events::end_token &&event)
-    {
-        return states::token_complete(std::forward<decltype(event)>(event));
     }
 
     states::type on_event(states::new_token &&, events::to_dec_literal &&event)
