@@ -102,40 +102,47 @@ class state_machine
         using namespace std::literals::chrono_literals;
 
         while (!terminate_) {
-            // empty() and pop() are both noexcept, so we don't need the
-            // security of RAII, and using it would make the code less
-            // readable with redundant scope blocks
-            event_queue_mutex_.lock();
-            auto const empty = event_queue_.empty();
-            event_queue_mutex_.unlock();
+            bool queue_empty = true;
+            do {
+                // empty() and pop() are both noexcept, so we don't need the
+                // security of RAII, and using it would make the code less
+                // readable with redundant scope blocks
+                event_queue_mutex_.lock();
+                queue_empty = event_queue_.empty();
+                event_queue_mutex_.unlock();
 
-            if (!empty) {
-                try {
-                    // process the event, leaving it in the queue so
-                    // other threads can wait on the queue being empty
-                    // to determine processing has finished in some
-                    // implementations
-                    event_t event(std::move(event_queue_.front()));
-                    process_event(std::move(event));
+                if (terminate_)
+                    return;
+                else if (queue_empty)
+                    std::this_thread::sleep_for(5ms);
+            } while (queue_empty);
 
-                    event_queue_mutex_.lock();
-                    event_queue_.pop_front();
-                    event_queue_mutex_.unlock();
-                }
-                catch (std::exception &)
-                {
-                }
+            try {
+                // process the event, leaving it in the queue so
+                // other threads can wait on the queue being empty
+                // to determine processing has finished in some
+                // implementations
+                event_t event(std::move(event_queue_.front()));
+                process_event(std::move(event));
+
+                event_queue_mutex_.lock();
+                event_queue_.pop_front();
+                event_queue_mutex_.unlock();
             }
-
-            std::this_thread::sleep_for(5ms);
+            catch (std::exception &)
+            {
+            }
         }
     }
 
     void process_event(event_t &&event)
     {
         auto fn = [instance = reinterpret_cast<derived_t *>(this)](auto &&state, auto &&event) -> state_t {
-            if constexpr (DebugTrace)
-                std::cout << "\033[95m" << typeid(event).name() << "\033[0m\n    ";
+            if constexpr (DebugTrace) {
+                std::ostringstream oss;
+                oss << "\033[95m" << typeid(event).name() << "\033[0m\n    ";
+                std::cout << oss.str();
+            }
 
             return instance->on_event(
                 std::move(state),
@@ -153,10 +160,12 @@ class state_machine
     state_t on_event(auto &&state, auto &&event)
     {
 #ifndef NDEBUG
-        std::cout << "\033[31mUnknown state/event combination\n";
-        std::cout << "    " << typeid(state).name() << '\t' << typeid(state).raw_name() << '\n';
-        std::cout << "    " << typeid(event).name() << '\t' << typeid(event).raw_name() << '\n';
-        std::cout << "\033[0m";
+        std::ostringstream oss;
+        oss << "\033[31mUnknown state/event combination\n";
+        oss << "    " << typeid(state).name() << '\t' << typeid(state).raw_name() << '\n';
+        oss << "    " << typeid(event).name() << '\t' << typeid(event).raw_name() << '\n';
+        oss << "\033[0m";
+        std::cout << oss.str();
 #endif  // NDEBUG
         return std::move(state);
     }
@@ -166,10 +175,13 @@ class state_machine
     {
         std::visit(
             [&new_state](auto &&type) {
-                std::cout << "\033[93m"
-                          << typeid(type).name() << " --> "
-                          << typeid(new_state).name()
-                          << "\033[0m\n";
+                std::ostringstream oss;
+                
+                oss << "\033[93m"
+                    << typeid(type).name() << " --> "
+                    << typeid(new_state).name()
+                    << "\033[0m\n";
+                std::cout << oss.str();
             },
             current_state_);
     }

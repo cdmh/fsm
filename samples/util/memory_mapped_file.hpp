@@ -19,7 +19,7 @@ class memory_mapped_file
         swap(other);
     }
 
-    memory_mapped_file &operator=(memory_mapped_file &&other)
+    memory_mapped_file &operator=(memory_mapped_file &&other) noexcept
     {
         swap(other);
         return *this;

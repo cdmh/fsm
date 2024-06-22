@@ -26,12 +26,12 @@ class expression_holder
         return expr_;
     }
 
-    int64_t const line() const noexcept
+    size_t const line() const noexcept
     {
         return line_;
     }
 
-    int64_t const column() const noexcept
+    size_t const column() const noexcept
     {
         return column_;
     }
@@ -56,7 +56,7 @@ class expression_holder
         return *next_++;
     }
 
-    uint64_t const on_next_line() noexcept
+    size_t const on_next_line() noexcept
     {
         column_ = 0;
         return ++line_;
@@ -67,7 +67,7 @@ class expression_holder
         return next_ != expr_.cend();
     }
 
-    int64_t const position() const noexcept
+    size_t const position() const noexcept
     {
         return std::distance(expr_.cbegin(), next_);
     }
@@ -75,8 +75,8 @@ class expression_holder
   private:
     std::string_view                 expr_;
     std::string_view::const_iterator next_;
-    int64_t                          line_   = 1;
-    int64_t                          column_ = 0;
+    size_t                           line_   = 1;
+    size_t                           column_ = 0;
 };
 
 class token_holder
@@ -140,6 +140,12 @@ class token_info : public detail::expression_holder, public detail::token_holder
     void reset_token()
     {
         token_ = std::string_view();
+    }
+
+    int64_t column() const noexcept
+    {
+        assert(expression_holder::column() >= token_.length());
+        return expression_holder::column() - token_.length() + 1;
     }
 
   protected:
@@ -358,7 +364,9 @@ class parse : public detail::expression_holder
     void enter(StateMachine &fsm)
     {
 #if TRACE_TOKENISER  ||  TRACE_TOKENS
-        std::cout << "\n\033[92mParsing: \"" << expr() << "\"\033[0m\n";
+        std::ostringstream oss;
+        oss << "\n\033[92mParsing: \"" << expr() << "\"\033[0m\n";
+        std::cout << oss.str();
 #endif  // TRACE_TOKENISER
         fsm.set_event(events::begin_token(std::move(*this)));
     }
@@ -400,51 +408,56 @@ class token_complete : public token_info
     {
         if (!token_.empty())
         {
-            std::cout << "\033[96m" << expr() << "\033[0m\t[";
+            std::ostringstream oss;
+#if 0 && TRACE_TOKENISER
+            oss << "\033[96m" << expr() << '\033[0m\t';
+#endif  // TRACE_TOKENISER
+
+            oss << "[";
             switch (token_type_) {
                 case token_type::unknown:
-                    std::cout << "unknown type";
+                    oss << "unknown type";
                     break;
                 case token_type::numeric_literal:
-                    std::cout << "numeric";
+                    oss << "numeric";
                     break;
                 case token_type::bin_literal:
-                    std::cout << "binary literal";
+                    oss << "binary literal";
                     break;
                 case token_type::dec_literal:
-                    std::cout << "decimal literal";
+                    oss << "decimal literal";
                     break;
                 case token_type::hex_literal:
-                    std::cout << "hex literal";
+                    oss << "hex literal";
                     break;
                 case token_type::oct_literal:
-                    std::cout << "octal literal";
+                    oss << "octal literal";
                     break;
                 case token_type::string_literal:
-                    std::cout << "string";
+                    oss << "string";
                     break;
                 case token_type::operator_token:
                     if constexpr (requires { fsm.operator_info(token_); })
-                        std::cout << "operator \033[93m" << fsm.operator_info(token_).second << "\033[0m";
+                        oss << "operator \033[93m" << fsm.operator_info(token_).second << "\033[0m";
                     else
-                        std::cout << "operator";
+                        oss << "operator";
                     break;
                 case token_type::symbol:
-                    std::cout << "symbol";
+                    oss << "symbol";
                     break;
                 case token_type::keyword:
-                    std::cout << "keyword";
+                    oss << "keyword";
                     break;
                 default:
-                    std::cout << "UNDEFINED";
+                    oss << "UNDEFINED";
                     break;
             }
-            std::cout << "] \033[30;46m" << token_ << "\033[0m";
+            oss << "] \033[30;46m" << token_ << "\033[0m";
             switch (token_type_) {
                 case token_type::bin_literal:
                 {
                     char* ptr = nullptr;
-                    std::cout << " (binary, decimal value " << strtoll(&*token_.cbegin(), &ptr, 2) << ')';
+                    oss << " (binary, decimal value " << strtoll(&*token_.cbegin(), &ptr, 2) << ')';
                     break;
                 }
                 case token_type::dec_literal:
@@ -453,26 +466,27 @@ class token_complete : public token_info
                     std::istringstream iss(token);
                     double value;
                     iss >> value;
-                    std::cout << " (decimal value " << value << ')';
+                    oss << " (decimal value " << value << ')';
                     break;
                 }
                 case token_type::hex_literal:
                 {
                     char* ptr = nullptr;
-                    std::cout << " (hex, decimal value " << strtoll(&*token_.cbegin(), &ptr, 16) << ')';
+                    oss << " (hex, decimal value " << strtoll(&*token_.cbegin(), &ptr, 16) << ')';
                     break;
                 }
                 case token_type::oct_literal:
                 {
                     char* ptr = nullptr;
-                    std::cout << " (octal, decimal value " << strtoll(&*token_.cbegin(), &ptr, 8) << ')';
+                    oss << " (octal, decimal value " << strtoll(&*token_.cbegin(), &ptr, 8) << ')';
                     break;
                 }
             }
-            std::cout << "\n";
+            oss << "\n";
+            std::cout << oss.str();
         }
     }
-#endif  // TRACE_TOKENISER
+#endif  // TRACE_TOKENISER  ||  TRACE_TOKENS
 };
 
 class in_operator_token : public detail::in_token<in_operator_token>
@@ -802,7 +816,7 @@ class tokeniser_state_machine_generic
     static constexpr auto valid_token_chars = make_lut("0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz_");
     static constexpr auto numeric_digits    = make_lut("0123456789");
     static constexpr auto space_chars       = make_lut(" \t\r\n\f\v");
-    static constexpr auto operator_chars    = make_lut("*|&!<>=+-/,.^()[]{}:;");
+    static constexpr auto operator_chars    = make_lut("*|&!<>=+-/,.^()[]{}:;#");
     static constexpr auto quote_chars       = make_lut("'\"");
     static constexpr auto bin_digits        = make_lut("01");
     static constexpr auto oct_digits        = make_lut("01234567");
@@ -878,7 +892,9 @@ class tokeniser_state_machine_generic
 
     states::type on_event(auto &&, events::error &&event)
     {
-        std::cout << "\033[91mERROR on line " << event.line() << ", column " << event.column() << ": " << event.what() << "\033[0m\n";
+        std::ostringstream oss;
+        oss << "\033[91mERROR on line " << event.line() << ", column " << event.column() << ": " << event.what() << "\033[0m\n";
+        std::cout << oss.str();
         return states::initialised();
     }
 
