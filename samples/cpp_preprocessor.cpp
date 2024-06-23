@@ -59,7 +59,7 @@ class receive_token : public tokeniser::token_info
         oss << "(" << column() << ", " << line() << ") " << "\033[30;46m" << token_ << "\033[0m\n";
         std::cout << oss.str();
 
-        if (column() == 1  &&  fsm.look_keyword(token_) == keyword_type::pp_preprocessor)
+        if (column() == 1  &&  fsm.lookup_keyword(token_) == keyword_type::pp_preprocessor)
             fsm.set_event(events::seen_directive(std::move(*this)));
     }
 };
@@ -70,7 +70,7 @@ class directive : public tokeniser::token_info
     template<typename StateMachine>
     void reenter(StateMachine &fsm)
     {
-        auto const keyword = fsm.look_keyword(token_);
+        auto const keyword = fsm.lookup_keyword(token_);
         switch (keyword)
         {
             case keyword_type::pp_include:  fsm.set_event(events::seen_include(std::move(*this)));  break;
@@ -80,7 +80,7 @@ class directive : public tokeniser::token_info
     template<typename StateMachine>
     void enter(StateMachine &fsm)
     {
-        assert(fsm.look_keyword(token_) == keyword_type::pp_preprocessor);
+        assert(fsm.lookup_keyword(token_) == keyword_type::pp_preprocessor);
     }
 };
 
@@ -107,7 +107,7 @@ class include : public tokeniser::token_info
     template<typename StateMachine>
     void enter(StateMachine &fsm)
     {
-        assert(fsm.look_keyword(token_) == keyword_type::pp_include);
+        assert(fsm.lookup_keyword(token_) == keyword_type::pp_include);
     }
 };
 
@@ -152,7 +152,7 @@ class preprocessor_state_machine
         return states::include(std::forward<decltype(event)>(event));
     }
 
-    keyword_type const look_keyword(std::string_view token) const noexcept
+    keyword_type const lookup_keyword(std::string_view token) const noexcept
     {
         auto const it = keywords_.find(token);
         return (it == keywords_.cend())? keyword_type::pp_none : it->second;
