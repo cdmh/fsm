@@ -91,7 +91,7 @@ class state_machine
 
         std::thread([this, fn] {
             while (!std::holds_alternative<State>(current_state_))
-                std::this_thread::sleep_for(10ms);
+                std::this_thread::sleep_for(5ms);
             fn();
         }).detach();
     }
@@ -102,32 +102,36 @@ class state_machine
         using namespace std::literals::chrono_literals;
 
         while (!terminate_) {
-            // empty() and pop() are both noexcept, so we don't need the
-            // security of RAII, and using it would make the code less
-            // readable with redundant scope blocks
-            event_queue_mutex_.lock();
-            auto const empty = event_queue_.empty();
-            event_queue_mutex_.unlock();
+            bool queue_empty = true;
+            do {
+                // empty() and pop() are both noexcept, so we don't need the
+                // security of RAII, and using it would make the code less
+                // readable with redundant scope blocks
+                event_queue_mutex_.lock();
+                queue_empty = event_queue_.empty();
+                event_queue_mutex_.unlock();
 
-            if (!empty) {
-                try {
-                    // process the event, leaving it in the queue so
-                    // other threads can wait on the queue being empty
-                    // to determine processing has finished in some
-                    // implementations
-                    event_t event(std::move(event_queue_.front()));
-                    process_event(std::move(event));
+                if (terminate_)
+                    return;
+                else if (queue_empty)
+                    std::this_thread::sleep_for(5ms);
+            } while (queue_empty);
 
-                    event_queue_mutex_.lock();
-                    event_queue_.pop_front();
-                    event_queue_mutex_.unlock();
-                }
-                catch (std::exception &)
-                {
-                }
+            try {
+                // process the event, leaving it in the queue so
+                // other threads can wait on the queue being empty
+                // to determine processing has finished in some
+                // implementations
+                event_t event(std::move(event_queue_.front()));
+                process_event(std::move(event));
+
+                event_queue_mutex_.lock();
+                event_queue_.pop_front();
+                event_queue_mutex_.unlock();
             }
-
-            std::this_thread::sleep_for(5ms);
+            catch (std::exception &)
+            {
+            }
         }
     }
 
