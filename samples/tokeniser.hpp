@@ -244,11 +244,11 @@ class in_token : public token_info
         if (has_more_chars()) {
             if (reinterpret_cast<Derived *>(this)->is_valid_char(fsm, peek())) {
                 extend_token();
-                fsm.set_event(events::continue_token(std::move(*this)));
+                fsm.enqueue_event(events::continue_token(std::move(*this)));
                 return;
             }
         }
-        fsm.set_event(events::end_token(std::move(*this)));
+        fsm.enqueue_event(events::end_token(std::move(*this)));
     }
 
     template<typename StateMachine>
@@ -282,7 +282,7 @@ class error : public detail::expression_holder
     void enter(StateMachine &fsm)
     {
         std::cerr << "Error: " << msg_ << '\n';
-        fsm.set_event(events::initialise());
+        fsm.enqueue_event(events::initialise());
     }
 
   private:
@@ -296,7 +296,7 @@ class new_line : public token_info
     void enter(StateMachine &fsm)
     {
         on_next_line();
-        fsm.set_event(events::begin_token(std::move(*this)));
+        fsm.enqueue_event(events::begin_token(std::move(*this)));
     }
 };
 
@@ -318,15 +318,15 @@ class new_token : public token_info
     void enter(StateMachine &fsm)
     {
         if (!has_more_chars()) {
-            fsm.set_event(events::end_token(std::move(*this)));
+            fsm.enqueue_event(events::end_token(std::move(*this)));
         }
         else if (peek() == '\n') {
             next_char(); // consume whitespace
-            fsm.set_event(events::seen_newline(std::move(*this)));
+            fsm.enqueue_event(events::seen_newline(std::move(*this)));
         }
         else if (fsm.is_space(peek())) {
             next_char(); // consume whitespace
-            fsm.set_event(events::begin_token(std::move(*this)));
+            fsm.enqueue_event(events::begin_token(std::move(*this)));
         }
         else {
             auto const ch = peek();
@@ -334,20 +334,20 @@ class new_token : public token_info
 
             if (ch == '.') {
                 if (has_more_chars()  &&  fsm.is_numeric_digit(peek()))
-                    fsm.set_event(events::to_dec_literal(std::move(*this)));
+                    fsm.enqueue_event(events::to_dec_literal(std::move(*this)));
                 else
-                    fsm.set_event(events::seen_operator_char(std::move(*this)));
+                    fsm.enqueue_event(events::seen_operator_char(std::move(*this)));
             }
             else if (ch == '0')
-                fsm.set_event(events::seen_leading_zero(std::move(*this)));
+                fsm.enqueue_event(events::seen_leading_zero(std::move(*this)));
             else if (fsm.is_numeric_digit(ch))
-                fsm.set_event(events::seen_digit(std::move(*this)));
+                fsm.enqueue_event(events::seen_digit(std::move(*this)));
             else if (fsm.is_operator_char(ch))
-                fsm.set_event(events::seen_operator_char(std::move(*this)));
+                fsm.enqueue_event(events::seen_operator_char(std::move(*this)));
             else if (fsm.is_quote_char(ch))
-                fsm.set_event(events::seen_quote(std::move(*this)));
+                fsm.enqueue_event(events::seen_quote(std::move(*this)));
             else
-                fsm.set_event(events::seen_symbol_char(std::move(*this)));
+                fsm.enqueue_event(events::seen_symbol_char(std::move(*this)));
         }
     }
 };
@@ -368,7 +368,7 @@ class parse : public detail::expression_holder
         oss << "\n\033[92mParsing: \"" << expr() << "\"\033[0m\n";
         std::cout << oss.str();
 #endif  // TRACE_TOKENISER
-        fsm.set_event(events::begin_token(std::move(*this)));
+        fsm.enqueue_event(events::begin_token(std::move(*this)));
     }
 };
 
@@ -386,7 +386,7 @@ class token_complete : public token_info
             msg << "Invalid character: '" << next_char() << "' in \"" << expr() << "\" at position " << position();
             events::error err(std::move(*this));
             err.set_message(msg.str());
-            fsm.set_event(std::move(err));
+            fsm.enqueue_event(std::move(err));
             return;
         }
         
@@ -397,9 +397,9 @@ class token_complete : public token_info
             fsm.on_token(*this);
 
         if (has_more_chars())
-            fsm.set_event(events::begin_token(std::move(*this)));
+            fsm.enqueue_event(events::begin_token(std::move(*this)));
         else
-            fsm.set_event(events::initialise());
+            fsm.enqueue_event(events::initialise());
     }
 
 #if TRACE_TOKENISER  ||  TRACE_TOKENS
@@ -501,12 +501,12 @@ class in_operator_token : public detail::in_token<in_operator_token>
             if constexpr (requires { fsm.greedy_operator_check(peek_extend_token()); }) {
                 if (fsm.greedy_operator_check(peek_extend_token())) {
                     extend_token();
-                    fsm.set_event(events::continue_token(std::move(*this)));
+                    fsm.enqueue_event(events::continue_token(std::move(*this)));
                     return;
                 }
             }
         }
-        fsm.set_event(events::end_token(std::move(*this)));
+        fsm.enqueue_event(events::end_token(std::move(*this)));
     }
 
 };
@@ -548,7 +548,7 @@ class in_symbol_token : public detail::in_token<in_symbol_token>
 
         if constexpr (requires { fsm.is_keyword(token_); }) {
             if (fsm.is_keyword(token_)) {
-                fsm.set_event(events::to_keyword(std::move(*this)));
+                fsm.enqueue_event(events::to_keyword(std::move(*this)));
                 return;
             }
         }
@@ -605,23 +605,23 @@ class in_numeric_token : public detail::in_token<in_numeric_token>
         if (has_more_chars()) {
             if (peek() == '.') {
                 extend_token();
-                fsm.set_event(events::to_dec_literal(std::move(*this)));
+                fsm.enqueue_event(events::to_dec_literal(std::move(*this)));
                 return;
             }
 
             if (peek() == 'e'  ||  peek() == 'E') {
                 extend_token();
-                fsm.set_event(events::seen_exponent(std::move(*this)));
+                fsm.enqueue_event(events::seen_exponent(std::move(*this)));
                 return;
             }
 
             if (is_valid_char(fsm, peek())) {
                 extend_token();
-                fsm.set_event(events::continue_token(std::move(*this)));
+                fsm.enqueue_event(events::continue_token(std::move(*this)));
                 return;
             }
         }
-        fsm.set_event(events::end_token(std::move(*this)));
+        fsm.enqueue_event(events::end_token(std::move(*this)));
     }
 
     template<typename StateMachine, typename CharType>
@@ -653,36 +653,36 @@ class in_numeric_base_token : public detail::in_token<in_numeric_base_token>
                     // clear the leading 0 and skip the base indicator
                     reset_token();
                     next_char();
-                    fsm.set_event(events::to_bin_literal(std::move(*this)));
+                    fsm.enqueue_event(events::to_bin_literal(std::move(*this)));
                     return;
         
                 case 'x':
                     // clear the leading 0 and skip the base indicator
                     reset_token();
                     next_char();
-                    fsm.set_event(events::to_hex_literal(std::move(*this)));
+                    fsm.enqueue_event(events::to_hex_literal(std::move(*this)));
                     return;
         
                 case 'e':
                 case 'E':
                     extend_token();
-                    fsm.set_event(events::seen_exponent(std::move(*this)));
+                    fsm.enqueue_event(events::seen_exponent(std::move(*this)));
                     return;
         
                 case '.':
                     extend_token();
-                    fsm.set_event(events::to_dec_literal(std::move(*this)));
+                    fsm.enqueue_event(events::to_dec_literal(std::move(*this)));
                     return;
 
                 default:        
                     if (fsm.is_oct_digit(peek())) {
-                        fsm.set_event(events::to_oct_literal(std::move(*this)));
+                        fsm.enqueue_event(events::to_oct_literal(std::move(*this)));
                         return;
                     }
             }
         }
 
-        fsm.set_event(events::end_token(std::move(*this)));
+        fsm.enqueue_event(events::end_token(std::move(*this)));
     }
 };
 
@@ -720,7 +720,7 @@ class in_dec_literal : public detail::in_token<in_dec_literal>
         if (has_more_chars()) {
             if (peek() == 'e'  ||  peek() == 'E') {
                 extend_token();
-                fsm.set_event(events::seen_exponent(std::move(*this)));
+                fsm.enqueue_event(events::seen_exponent(std::move(*this)));
                 return;
             }
             else if (peek() == '.') {
@@ -728,7 +728,7 @@ class in_dec_literal : public detail::in_token<in_dec_literal>
                 msg << "Invalid character: '" << next_char() << "' in \"" << expr() << "\" at position " << position();
                 events::error err(std::move(*this));
                 err.set_message(msg.str());
-                fsm.set_event(std::move(err));
+                fsm.enqueue_event(std::move(err));
                 return;
             }
         }
@@ -809,7 +809,7 @@ class tokeniser_state_machine_generic
 
     void tokenise(std::string_view str)
     {
-        base_type::set_event(events::begin_parsing(std::move(str)));
+        base_type::enqueue_event(events::begin_parsing(std::move(str)));
         base_type::wait_for_empty_event_queue();
     }
 

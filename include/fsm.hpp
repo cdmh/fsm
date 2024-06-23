@@ -1,6 +1,7 @@
 #pragma once
 
 #include <chrono>
+#include <cassert>
 #include <deque>
 #include <functional>   // std::bind
 #include <iostream>
@@ -63,7 +64,7 @@ class state_machine
             event_thread_.join();
     }
 
-    void set_event(event_t &&event)
+    void enqueue_event(event_t &&event)
     {
         std::scoped_lock lock(event_queue_mutex_);
         event_queue_.push_back(std::forward<event_t>(event));
@@ -97,6 +98,94 @@ class state_machine
     }
 
   protected:
+    state_t on_event(auto &&state, auto &&event)
+    {
+#ifndef NDEBUG
+        std::ostringstream oss;
+        oss << "\033[31mUnknown state/event combination\n";
+        oss << "    " << typeid(state).name() << '\t' << typeid(state).raw_name() << '\n';
+        oss << "    " << typeid(event).name() << '\t' << typeid(event).raw_name() << '\n';
+        oss << "\033[0m";
+        std::cout << oss.str();
+#endif  // NDEBUG
+        return std::move(state);
+    }
+
+    void process_event(event_t &&event)
+    {
+        auto fn = [instance = reinterpret_cast<derived_t *>(this)](auto &&state, auto &&event) -> state_t {
+            if constexpr (DebugTrace) {
+                std::ostringstream oss;
+                oss << "\033[95m" << typeid(event).name() << "\033[0m\n    ";
+                std::cout << oss.str();
+            }
+
+            return instance->on_event(
+                std::move(state),
+                std::move(event));
+        };
+
+        auto &&new_state = std::visit(detail::overload{ fn }, current_state_, event);
+
+        bool const state_changed = (new_state.index() != current_state_.index());
+        std::visit(
+            detail::overload{[this, state_changed](auto &&state){ transition(state, state_changed); } },
+            new_state);
+    }
+
+  private:
+    void debug_output_transition(auto &new_state)
+    {
+        std::visit(
+            [&new_state](auto &&type) {
+                std::ostringstream oss;
+                
+                oss << "\033[93m"
+                    << typeid(type).name() << " --> "
+                    << typeid(new_state).name()
+                    << "\033[0m\n";
+                std::cout << oss.str();
+            },
+            current_state_);
+    }
+
+    void transition(auto &&new_state, bool const state_changed)
+    {
+        if constexpr (DebugTrace)
+            debug_output_transition(new_state);
+
+        auto instance = reinterpret_cast<derived_t *>(this);
+        if (state_changed)
+        {
+            std::visit(
+                [this](auto &state){
+                    auto instance = reinterpret_cast<derived_t *>(this);
+                    if constexpr (requires { state.leave(*instance); })
+                        state.leave(*instance);
+                },
+                current_state_);
+
+            current_state_ = std::move(new_state);
+
+            std::visit(
+                [this](auto &state){
+                    auto instance = reinterpret_cast<derived_t *>(this);
+                    if constexpr (requires { state.enter(*instance); })
+                        state.enter(*instance);
+                },
+                current_state_);
+        }
+        else
+        {
+            // if the state hasn't changed, we call reenter() instead of
+            // leave() followed by enter().
+            // this gives the FSM implementer a choice of how to handle
+            // re-entry
+            if constexpr (requires { new_state.reenter(*instance); })
+                new_state.reenter(*instance);
+        }
+    }
+
     void event_thread()
     {
         using namespace std::literals::chrono_literals;
@@ -135,98 +224,11 @@ class state_machine
         }
     }
 
-    void process_event(event_t &&event)
-    {
-        auto fn = [instance = reinterpret_cast<derived_t *>(this)](auto &&state, auto &&event) -> state_t {
-            if constexpr (DebugTrace) {
-                std::ostringstream oss;
-                oss << "\033[95m" << typeid(event).name() << "\033[0m\n    ";
-                std::cout << oss.str();
-            }
-
-            return instance->on_event(
-                std::move(state),
-                std::move(event));
-        };
-
-        auto &&new_state = std::visit(detail::overload{ fn }, current_state_, event);
-
-        bool const state_changed = (new_state.index() != current_state_.index());
-        std::visit(
-            detail::overload{[this, state_changed](auto &&state){ transition(state, state_changed); } },
-            new_state);
-    }
-
-    state_t on_event(auto &&state, auto &&event)
-    {
-#ifndef NDEBUG
-        std::ostringstream oss;
-        oss << "\033[31mUnknown state/event combination\n";
-        oss << "    " << typeid(state).name() << '\t' << typeid(state).raw_name() << '\n';
-        oss << "    " << typeid(event).name() << '\t' << typeid(event).raw_name() << '\n';
-        oss << "\033[0m";
-        std::cout << oss.str();
-#endif  // NDEBUG
-        return std::move(state);
-    }
-
-  private:
-    void debug_output_transition(auto &new_state)
-    {
-        std::visit(
-            [&new_state](auto &&type) {
-                std::ostringstream oss;
-                
-                oss << "\033[93m"
-                    << typeid(type).name() << " --> "
-                    << typeid(new_state).name()
-                    << "\033[0m\n";
-                std::cout << oss.str();
-            },
-            current_state_);
-    }
-    void transition(auto &&new_state, bool const state_changed)
-    {
-        if constexpr (DebugTrace)
-            debug_output_transition(new_state);
-
-        auto instance = reinterpret_cast<derived_t *>(this);
-        if (state_changed)
-        {
-            std::visit(
-                [this](auto &state){
-                    auto instance = reinterpret_cast<derived_t *>(this);
-                    if constexpr (requires { state.leave(*instance); })
-                        state.leave(*instance);
-                },
-                current_state_);
-
-            current_state_ = std::move(new_state);
-
-            std::visit(
-                [this](auto &state){
-                    auto instance = reinterpret_cast<derived_t *>(this);
-                    if constexpr (requires { state.enter(*instance); })
-                        state.enter(*instance);
-                },
-                current_state_);
-        }
-        else
-        {
-            // if the state hasn't changed, we call reenter() instead of
-            // leave() followed by enter().
-            // this gives the FSM implementer a choice of how to handle
-            // re-entry
-            if constexpr (requires { new_state.reenter(*instance); })
-                new_state.reenter(*instance);
-        }
-    }
-
   private:
     bool                terminate_ = false;
     state_t             current_state_;
-    std::mutex mutable  event_queue_mutex_;
     std::thread         event_thread_;
+    std::mutex mutable  event_queue_mutex_;
     std::deque<event_t> event_queue_;
 };
 

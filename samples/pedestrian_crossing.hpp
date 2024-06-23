@@ -71,7 +71,7 @@ struct state_base
     {
         auto timer_fn = [this, &fsm, event]{
             std::this_thread::sleep_for(event.duration);
-            fsm.set_event(event);
+            fsm.enqueue_event(event);
         };
         std::thread(timer_fn).detach();
     }
@@ -153,7 +153,7 @@ struct amber_flash_button_pressed
         std::cout << "Amber is flashing. Button press has been queued\n";
         fsm.async_wait_for_state<states::green>(
             [&fsm](){
-                fsm.set_event(events::press_button());
+                fsm.enqueue_event(events::press_button());
             });
     }
 };
@@ -249,7 +249,7 @@ class crossing_state_machine
 void run()
 {
     crossing_state_machine crossing;
-    crossing.set_event(events::initialised());
+    crossing.enqueue_event(events::initialised());
 
     bool quit = false;
     while (!quit)
@@ -267,7 +267,7 @@ void run()
 
             case 'b':
             case 'B':
-                crossing.set_event(events::press_button());
+                crossing.enqueue_event(events::press_button());
                 break;
         }
     }

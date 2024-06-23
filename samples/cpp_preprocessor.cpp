@@ -24,13 +24,15 @@ namespace events {
 
 struct on_token       : public tokeniser::token_info { };
 struct seen_directive : public tokeniser::token_info { };
+struct seen_include   : public tokeniser::token_info { };
 
 
 // this variant must include all events used in the state machine
 using type = std::variant<
     tokeniser::events::end_token,
     on_token,
-    seen_directive
+    seen_directive,
+    seen_include
 >;
 
 }   // namespace events
@@ -66,21 +68,55 @@ class directive : public tokeniser::token_info
 {
   public:
     template<typename StateMachine>
-    void enter(StateMachine &fsm)
+    void reenter(StateMachine &fsm)
     {
-        auto keyword = fsm.look_keyword(token_);
+        auto const keyword = fsm.look_keyword(token_);
         switch (keyword)
         {
-            case keyword_type::pp_include:  assert(true);//fsm.set_event(events::seen_include(std::move(*this)));  break;
+            case keyword_type::pp_include:  fsm.set_event(events::seen_include(std::move(*this)));  break;
         }
+    }
+
+    template<typename StateMachine>
+    void enter(StateMachine &fsm)
+    {
+        assert(fsm.look_keyword(token_) == keyword_type::pp_preprocessor);
+    }
+};
+
+class include : public tokeniser::token_info
+{
+  public:
+    template<typename StateMachine>
+    void reenter(StateMachine &fsm)
+    {
+        if (token_type_ == token_type::string_literal) {
+            assert(token_.front() == '\"');
+            assert(token_.back() == '\"');
+        }
+        else {
+            assert(token_.front() == '<');
+            assert(token_.back() == '>');
+        }
+
+        //!!! include "" and include <> are currently processed the same as each other
+        std::string filename(std::string_view(++token_.begin(), --token_.end()));
+        auto mmf = os::map_file(filename.c_str());
+    }
+
+    template<typename StateMachine>
+    void enter(StateMachine &fsm)
+    {
+        assert(fsm.look_keyword(token_) == keyword_type::pp_include);
     }
 };
 
 // this variant must include all states used in the state machine
 using type = std::variant<
     initialised,    // initial state
-    receive_token,
-    directive
+    directive,
+    include,
+    receive_token
 >;
 
 }   // namespace states
@@ -111,10 +147,20 @@ class preprocessor_state_machine
         return states::directive(std::forward<decltype(event)>(event));
     }
 
+    states::type on_event(states::directive &&, events::seen_include &&event)
+    {
+        return states::include(std::forward<decltype(event)>(event));
+    }
+
     keyword_type const look_keyword(std::string_view token) const noexcept
     {
         auto const it = keywords_.find(token);
         return (it == keywords_.cend())? keyword_type::pp_none : it->second;
+    }
+
+    void set_event(events::type &&event)
+    {
+        process_event(std::forward<events::type>(event));
     }
 
   private:
