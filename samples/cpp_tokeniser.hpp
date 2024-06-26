@@ -166,7 +166,7 @@ class cpp_tokeniser_state_machine_generic
         { "{",  { operator_type::open_curly_bracket,  "open_curly_bracket"  } },
         { "}",  { operator_type::close_curly_bracket, "close_curly_bracket" } },
         { ":",  { operator_type::colon,               "colon"               } },
-        { "#",  { operator_type::preprocessor,        "preprocessor"        } },
+        { "#",  { operator_type::preprocessor,        "preprocessor_tokeniser"        } },
         { ";",  { operator_type::semicolon,           "semicolon"           } },
         { "//", { operator_type::comment,             "comment"             } },
         { "&&", { operator_type::logical_and,         "logical_and"         } },

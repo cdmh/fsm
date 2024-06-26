@@ -1,8 +1,11 @@
 #define TRACE_TOKENISER 0
 #define TRACE_TOKENS    1
 #define TRACE_CPP_PREPROCESSOR 1
+#define _CRT_SECURE_NO_WARNINGS 1
+#include <filesystem>
 #include "cpp_tokeniser.hpp"
 #include "util/memory_mapped_file.hpp"
+
 
 namespace cpp_preprocessor {
 
@@ -22,14 +25,19 @@ enum class keyword_type
 
 namespace events {
 
-struct on_token       : public tokeniser::token_info { };
-struct seen_directive : public tokeniser::token_info { };
-struct seen_include   : public tokeniser::token_info { };
-
+struct initialise                                           { };
+struct on_token              : public tokeniser::token_info { };
+struct seen_directive        : public tokeniser::token_info { };
+struct seen_include          : public tokeniser::token_info { };
+struct include_open_bracket  : public tokeniser::token_info { };
+struct include_close_bracket : public tokeniser::token_info { };
 
 // this variant must include all events used in the state machine
 using type = std::variant<
     tokeniser::events::end_token,
+    include_open_bracket,
+    include_close_bracket,
+    initialise,
     on_token,
     seen_directive,
     seen_include
@@ -88,26 +96,75 @@ class include : public tokeniser::token_info
 {
   public:
     template<typename StateMachine>
+    void enter(StateMachine &fsm)
+    {
+        assert(fsm.lookup_keyword(token_) == keyword_type::pp_include);
+    }
+
+    template<typename StateMachine>
     void reenter(StateMachine &fsm)
     {
         if (token_type_ == token_type::string_literal) {
             assert(token_.front() == '\"');
             assert(token_.back() == '\"');
+
+            std::string filename(std::string_view(++token_.begin(), --token_.end()));
+            fsm.run(filename);
         }
-        else {
+        else if (token_type_ == token_type::operator_token) {
             assert(token_.front() == '<');
-            assert(token_.back() == '>');
+            fsm.set_event(events::include_open_bracket(std::move(*this)));
+        }
+    }
+};
+
+class include_from_path : public tokeniser::token_info
+{
+  public:
+    template<typename StateMachine>
+    void reenter(StateMachine &fsm)
+    {
+        std::filesystem::path pathname = std::string_view(token_.begin(), token_.end());
+
+        std::string includes;
+        if (auto p = getenv("INCLUDE"))
+            includes = p;
+
+        if (!includes.empty()) {
+            size_t start = 0;
+            do
+            {
+#ifdef _WIN32
+                auto const sep = ';';
+#else
+                auto const sep = ':';
+#endif
+                auto end = includes.find(sep, start);
+                std::filesystem::path fullpath = includes.substr(start, end) / pathname;
+                if (exists(fullpath)  &&  !is_directory(fullpath)) {
+                    pathname = std::move(fullpath);
+                    break;
+                }
+                else if (end == std::string::npos)
+                    return;
+
+                start = end+1;
+            } while (true);
         }
 
-        //!!! include "" and include <> are currently processed the same as each other
-        std::string filename(std::string_view(++token_.begin(), --token_.end()));
-        auto mmf = os::map_file(filename.c_str());
+        fsm.run(pathname.string());
+        fsm.set_event(events::include_close_bracket(std::move(*this)));
     }
+};
 
+class end_include_from_path : public tokeniser::token_info
+{
+  public:
     template<typename StateMachine>
-    void enter(StateMachine &fsm)
+    void reenter(StateMachine &fsm)
     {
-        assert(fsm.lookup_keyword(token_) == keyword_type::pp_include);
+        assert(token_.back() == '>');
+        fsm.set_event(events::initialise());
     }
 };
 
@@ -115,7 +172,9 @@ class include : public tokeniser::token_info
 using type = std::variant<
     initialised,    // initial state
     directive,
+    end_include_from_path,
     include,
+    include_from_path,
     receive_token
 >;
 
@@ -123,14 +182,64 @@ using type = std::variant<
 
 namespace detail {
 
-class preprocessor_state_machine
-  : public fsm::state_machine<preprocessor_state_machine, states::type, events::type, TRACE_CPP_PREPROCESSOR==1>
+template<typename PP>
+class preprocessor_tokeniser
+  : public cpp_tokeniser::cpp_tokeniser_state_machine_generic<preprocessor_tokeniser<PP>>
 {
-    using base_type = fsm::state_machine<preprocessor_state_machine, states::type, events::type, TRACE_CPP_PREPROCESSOR==1>;
+    using base_type = cpp_tokeniser::cpp_tokeniser_state_machine_generic<preprocessor_tokeniser<PP>>;
+
+  public:
+    preprocessor_tokeniser(PP &preprocessor) : preprocessor_(preprocessor)
+    {
+    }
+
+    // enable default processing for undefined state/event pairs
+    using base_type::on_event;
+
+    // we receive an event from the tokeniser state machine to enter this one
+    tokeniser::states::type on_event(auto &&state, tokeniser::events::end_token &&event)
+    {
+        // copy the token here so we own a token for our state machine
+        tokeniser::token_info token(event);
+        preprocessor_.set_event(events::on_token(std::move(token)));
+
+        // the return type needs to be from the same state machine, so we call the
+        // base class to maintain that state machine while we change states on our
+        // this machine
+        return base_type::on_event(
+            std::forward<decltype(state)>(state),
+            std::forward<decltype(event)>(event));
+    }
+
+  private:
+    PP &preprocessor_;
+};
+
+}   // namespace detail
+
+class preprocessor
+  : protected fsm::state_machine<preprocessor, states::type, events::type, TRACE_TOKENISER==1>
+{
+    using base_type = fsm::state_machine<preprocessor, states::type, events::type, TRACE_TOKENISER==1>;
 
   public:
     // enable default processing for undefined state/event pairs
     using base_type::on_event;
+
+    states::type on_event(auto &&, events::include_open_bracket  &&event)
+    {
+        return states::include_from_path(std::forward<decltype(event)>(event));
+    }
+
+    states::type on_event(auto &&, events::include_close_bracket &&event)
+    {
+        return states::end_include_from_path(std::forward<decltype(event)>(event));
+    }
+
+    states::type on_event(auto &&, events::initialise &&)
+    {
+        return states::initialised();
+    }
 
     states::type on_event(states::initialised &&, events::on_token &&event)
     {
@@ -163,6 +272,24 @@ class preprocessor_state_machine
         process_event(std::forward<events::type>(event));
     }
 
+    void run(std::string_view pathname)
+    {
+        set_event(events::initialise());
+
+#ifdef TRACE_CPP_PREPROCESSOR
+        std::cout << "\033[95mInclude " << pathname << "\033[0m\n";
+#endif  // TRACE_CPP_PREPROCESSOR
+
+        auto mmf = os::map_file(pathname);
+        if (!mmf) {
+            std::cerr << "Unable to open file \"" << pathname << "\". Error " << GetLastError() << "\n";
+            return;
+        }
+
+        detail::preprocessor_tokeniser<preprocessor> tokeniser(*this);
+        tokeniser.tokenise(std::string_view(mmf, mmf.size()));
+    }
+
   private:
     using keyword_info_type  = keyword_type;
 
@@ -185,52 +312,10 @@ class preprocessor_state_machine
     };
 };
 
-}   // namespace detail
-
-class preprocessor
-  : public cpp_tokeniser::cpp_tokeniser_state_machine_generic<preprocessor>
-{
-    using base_type = cpp_tokeniser_state_machine_generic<preprocessor>;
-
-  public:
-    void run(std::string_view cpp)
-    {
-        tokenise(cpp);
-        preprocessor_.wait_for_empty_event_queue();
-    }
-
-    // enable default processing for undefined state/event pairs
-    using base_type::on_event;
-
-    // we receive an event from the tokeniser state machine to enter this one
-    tokeniser::states::type on_event(auto &&state, tokeniser::events::end_token &&event)
-    {
-        // copy the token here so we own a token for our state machine
-        tokeniser::token_info token(event);
-        preprocessor_.set_event(events::on_token(std::move(token)));
-
-        // the return type needs to be from the same state machine, so we call the
-        // base class to maintain that state machine while we change states on our
-        // this machine
-        return base_type::on_event(
-            std::forward<decltype(state)>(state),
-            std::forward<decltype(event)>(event));
-    }
-
-  private:
-    detail::preprocessor_state_machine preprocessor_;
-};
-
 void run(char const * const pathname)
 {
-    auto mmf = os::map_file(pathname);
-    if (!mmf) {
-        std::cerr << "Unable to open file " << pathname << "\n";
-        return;
-    }
-
     preprocessor pp;
-    pp.run(std::string_view(mmf, mmf.size()));
+    pp.run(pathname);
 }
 
 }   // namespace preprocessor

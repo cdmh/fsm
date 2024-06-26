@@ -57,13 +57,13 @@ class memory_mapped_file
         }
     }
 
-    bool open(char const * const pathname) noexcept
+    bool open(std::string_view pathname) noexcept
     {
-        file_ = CreateFileA(pathname, GENERIC_READ, 0, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+        file_ = CreateFileA(&*pathname.cbegin(), GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
         if (file_ == INVALID_HANDLE_VALUE)
             return false;
 
-        file_mapping_ = CreateFileMapping(file_, NULL, PAGE_READONLY, 0, 0, NULL);
+        file_mapping_ = CreateFileMapping(file_, NULL, PAGE_READONLY,  0, 0, NULL);
         if (file_mapping_ == NULL)
             return false;
 
@@ -94,7 +94,7 @@ class memory_mapped_file
     char const *base_ptr_     = nullptr;
 };
 
-inline memory_mapped_file map_file(char const * const pathname)
+inline memory_mapped_file map_file(std::string_view pathname)
 {
     memory_mapped_file mmf;
     mmf.open(pathname);

@@ -180,7 +180,7 @@ class error : public detail::expression_holder
 struct begin_parsing : public detail::expression_holder
 {
     begin_parsing(std::string_view &&expression)
-        : expression_holder(std::forward<std::string_view>(expression))
+      : expression_holder(std::forward<std::string_view>(expression))
     {
     }
 };
@@ -363,7 +363,7 @@ class parse : public detail::expression_holder
     template<typename StateMachine>
     void enter(StateMachine &fsm)
     {
-#if TRACE_TOKENISER  ||  TRACE_TOKENS
+#if 0//TRACE_TOKENISER  ||  TRACE_TOKENS
         std::ostringstream oss;
         oss << "\n\033[92mParsing: \"" << expr() << "\"\033[0m\n";
         std::cout << oss.str();
