@@ -92,7 +92,7 @@ class state_machine
 
         std::thread([this, fn] {
             while (!std::holds_alternative<State>(current_state_))
-                std::this_thread::sleep_for(10ms);
+                std::this_thread::sleep_for(5ms);
             fn();
         }).detach();
     }
@@ -109,6 +109,11 @@ class state_machine
         std::cout << oss.str();
 #endif  // NDEBUG
         return std::move(state);
+                    return;
+                else if (queue_empty)
+                    std::this_thread::sleep_for(5ms);
+            } while (queue_empty);
+
     }
 
     void process_event(event_t &&event)
