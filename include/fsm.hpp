@@ -44,6 +44,7 @@ class state_machine
     using event_t = Event;
     using state_t = State;
     using derived_t = Derived;
+    const bool debug_trace = DebugTrace;
 
   public:
     // make the state machine non-copyable, non-movable
@@ -119,7 +120,11 @@ class state_machine
                 oss << "\033[95m" << typeid(event).name() << "\033[0m\n    ";
                 std::cout << oss.str();
             }
-
+#if TRACE_TOKENISER==1
+        static_assert(DebugTrace);
+#else
+        static_assert(!DebugTrace);
+#endif
             return instance->on_event(
                 std::move(state),
                 std::move(event));

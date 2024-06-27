@@ -7,6 +7,7 @@
 #include <sstream>
 
 #ifndef TRACE_TOKENISER
+#error TRACE_TOKENISER not defined
 #define TRACE_TOKENISER 0
 #endif  // TRACE_TOKENISER
 
@@ -363,7 +364,7 @@ class parse : public detail::expression_holder
     template<typename StateMachine>
     void enter(StateMachine &fsm)
     {
-#if 0//TRACE_TOKENISER  ||  TRACE_TOKENS
+#if TRACE_TOKENISER  ||  TRACE_TOKENS
         std::ostringstream oss;
         oss << "\n\033[92mParsing: \"" << expr() << "\"\033[0m\n";
         std::cout << oss.str();
@@ -409,8 +410,8 @@ class token_complete : public token_info
         if (!token_.empty())
         {
             std::ostringstream oss;
-#if 0 && TRACE_TOKENISER
-            oss << "\033[96m" << expr() << '\033[0m\t';
+#if TRACE_TOKENISER
+            oss << "\033[96m" << expr() << "\033[0m\t";
 #endif  // TRACE_TOKENISER
 
             oss << "[";
@@ -807,10 +808,11 @@ class tokeniser_state_machine_generic
   public:
     using base_type = fsm::state_machine<Derived, states::type, events::type, TRACE_TOKENISER==1>;
 
-    void tokenise(std::string_view str)
+    bool const tokenise(std::string_view str)
     {
         base_type::enqueue_event(events::begin_parsing(std::move(str)));
         base_type::wait_for_empty_event_queue();
+        return true;
     }
 
     static constexpr auto valid_token_chars = make_lut("0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz_");
